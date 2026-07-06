@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import time
 
+from ..byok_limit import record_byok_usage
 from ..cache import make_args_hash
 from ..context import ServiceContext
 from ..errors import McpZakupkiError
 from ..schemas import Tender, TenderStatus
+from ..tier import enforce_byok_if_needed
 from ..validators import validate_reg_number
 
 _TOOL_NAME = "get_tender"
@@ -44,11 +46,20 @@ async def get_tender(
         return tender
 
     try:
-        tender = await ctx.resolver.get_tender(
-            norm_reg,
-            include_documents=include_documents,
-            include_protocols=include_protocols,
-        )
+        if ctx.config.hosted_mode_enabled and ctx.hosted is not None:
+            tender = await ctx.hosted.get_tender(
+                norm_reg,
+                include_documents=include_documents,
+                include_protocols=include_protocols,
+            )
+        else:
+            await enforce_byok_if_needed(ctx)
+            tender = await ctx.resolver.get_tender(
+                norm_reg,
+                include_documents=include_documents,
+                include_protocols=include_protocols,
+            )
+            await record_byok_usage(ctx.cache, has_atomno_key=False)
     except McpZakupkiError as exc:
         await ctx.cache.write_audit(
             _TOOL_NAME,

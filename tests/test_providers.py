@@ -15,7 +15,6 @@ from mcp_zakupki.errors import (
 from mcp_zakupki.providers import (
     DamiaProvider,
     GosplanProvider,
-    HtmlFallbackProvider,
     NavodkiProvider,
     ProviderResolver,
 )
@@ -37,6 +36,8 @@ def _cfg(**overrides) -> AppConfig:
             user_agent=base.user_agent,
             http_proxy=base.http_proxy,
             log_level=base.log_level,
+            allow_html_scraping=base.allow_html_scraping,
+            byok_daily_limit=base.byok_daily_limit,
         )
     return base
 
@@ -51,12 +52,6 @@ class TestProviderInfo:
     def test_damia_unconfigured(self) -> None:
         p = DamiaProvider(_cfg())
         assert p.is_configured is False
-
-    def test_html_fallback_always_configured(self) -> None:
-        p = HtmlFallbackProvider(_cfg())
-        assert p.info.name == "html_fallback"
-        assert p.info.capabilities & ProviderCapability.TENDER_DETAILS
-        assert p.is_configured is True
 
     def test_gosplan_unconfigured(self) -> None:
         assert GosplanProvider(_cfg()).is_configured is False
@@ -126,7 +121,6 @@ class TestDamiaSearch:
 @pytest.mark.asyncio
 class TestResolverFallback:
     async def test_api_chain_without_keys_raises_unavailable(self) -> None:
-        # Default API-only chain: damia + gosplan + navodki без ключей.
         cfg = _cfg()
         async with ProviderResolver(cfg) as resolver:
             with pytest.raises(ProviderUnavailableError) as exc_info:
@@ -136,25 +130,9 @@ class TestResolverFallback:
             assert attempted_names == {"damia", "gosplan", "navodki"}
             assert "html_fallback" not in attempted_names
 
-    async def test_get_tender_falls_to_html_when_opted_in(self, monkeypatch) -> None:
-        cfg = _cfg(chain=("html_fallback",))
-        with respx.mock(assert_all_called=False) as router:
-            router.get(
-                "https://zakupki.gov.ru/epz/order/notice/printForm/viewXml.html"
-            ).mock(
-                return_value=Response(
-                    200,
-                    text=(
-                        '<?xml version="1.0" encoding="utf-8"?>'
-                        "<export44>"
-                        "<purchaseObjectInfo>Тестовый тендер</purchaseObjectInfo>"
-                        "<INN>7707083893</INN>"
-                        "<shortName>ООО ПРИМЕР</shortName>"
-                        "</export44>"
-                    ),
-                )
-            )
-            async with ProviderResolver(cfg) as resolver:
-                tender = await resolver.get_tender("0173100007426000018")
-        assert tender.reg_number == "0173100007426000018"
-        assert tender.source_provider == "html_fallback"
+    async def test_html_fallback_removed_from_open_client(self) -> None:
+        cfg = _cfg(chain=("html_fallback", "damia"))
+        async with ProviderResolver(cfg) as resolver:
+            names = [p.name for p in resolver.chain]
+        assert names == ["damia"]
+        assert "html_fallback" not in names

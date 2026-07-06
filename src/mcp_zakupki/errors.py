@@ -90,3 +90,15 @@ class ConfigurationError(McpZakupkiError):
     """Невалидная конфигурация процесса (например, MCP_ZAKUPKI_LOG_LEVEL=TRACE)."""
 
     code = "configuration_error"
+
+
+class ProRequiredError(McpZakupkiError):
+    """Pro/hosted-only фича без Atomno API-ключа."""
+
+    code = "pro_required"
+
+
+class HostedApiUnavailableError(McpZakupkiError):
+    """Hosted API api.atomno-mcp.ru ещё не доступен или вернул ошибку."""
+
+    code = "hosted_unavailable"

@@ -55,15 +55,14 @@ mcp: FastMCP = FastMCP(
     name="atomno-mcp-zakupki",
     instructions=(
         "Сервер для работы с порталом российских госзакупок zakupki.gov.ru "
-        "(44-ФЗ, 223-ФЗ, 615-ПП). 5 open-tools: search_tenders (поиск по "
-        "30+ фильтрам), get_tender (карточка по реестровому номеру), "
-        "get_customer_history / get_supplier_stats (история заказчика / "
-        "поставщика), lookup_okpd2 (поиск кода ОКПД2 по тексту). "
-        "Источники — каскад API: DaMIA → ГосПлан API v2 → navodki.ru "
-        "(по умолчанию без HTML-парсинга). Опционально EIS-токен Минфина "
-        "или html_fallback через MCP_ZAKUPKI_PROVIDERS. Pro-функции "
-        "(AI-summary, win_probability, watch-листы, RAG по 44-ФЗ) — "
-        "отдельный сервер api.atomno-mcp.ru/zakupki/ с подпиской."
+        "(44-ФЗ, 223-ФЗ, 615-ПП). Open-tools: search_tenders, get_tender, "
+        "lookup_okpd2 (офлайн-справочник ОКПД2). Источники search/get — "
+        "только легальные API (DaMIA / ГосПлан / navodki) с BYOK-ключом; "
+        "HTML-scraping удалён из open-клиента (v0.1.1). "
+        "get_customer_history и get_supplier_stats — Pro hosted API "
+        "(MCP_ZAKUPKI_API_KEY, https://atomno-mcp.ru/pricing#zakupki-pro). "
+        "Для production рекомендуется hosted API; BYOK — advanced/deprecated. "
+        "Pro-функции (AI-summary, win_probability, watch) — на api.atomno-mcp.ru."
     ),
 )
 
@@ -225,12 +224,10 @@ async def get_customer_history(
     period_from: str | None = None,
     period_to: str | None = None,
 ) -> dict[str, Any]:
-    """История закупок заказчика по ИНН или ОГРН.
+    """История закупок заказчика по ИНН или ОГРН (Pro hosted API).
 
-    Возвращает: количество тендеров, объём закупок, средний / медианный
-    контракт, топ-ОКПД2, доля СМП, топ-победителей.
-
-    Минимум один из `inn` или `ogrn` обязателен.
+    Требует `MCP_ZAKUPKI_API_KEY`. Агрегация истории заказчика — Pro-функция;
+    open-клиент не выполняет её через BYOK-провайдеры.
 
     Args:
         inn: ИНН заказчика (10 цифр для юр.лица, 12 для ИП).
@@ -259,10 +256,9 @@ async def get_supplier_stats(
     period_from: str | None = None,
     period_to: str | None = None,
 ) -> dict[str, Any]:
-    """Статистика поставщика по ИНН или ОГРН.
+    """Статистика поставщика по ИНН или ОГРН (Pro hosted API).
 
-    Возвращает: победы / поражения / РНП-статус / отрасли / регионы /
-    средний дисконт от НМЦК / победный коэффициент.
+    Требует `MCP_ZAKUPKI_API_KEY`. Агрегация статистики поставщика — Pro-функция.
 
     Args:
         inn: ИНН поставщика.
@@ -346,10 +342,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "  MCP_ZAKUPKI_DAMIA_KEY    — API-ключ DaMIA (api.damia.ru/zakupki).\n"
             "  MCP_ZAKUPKI_GOSPLAN_KEY  — API-ключ ГосПлан API v2.\n"
             "  MCP_ZAKUPKI_NAVODKI_KEY  — API-ключ navodki.ru.\n"
-            "  MCP_ZAKUPKI_API_KEY      — Pro-ключ (api.atomno-mcp.ru/zakupki/).\n"
+            "  MCP_ZAKUPKI_API_KEY      — Pro hosted API (обязателен для "
+            "get_customer_history / get_supplier_stats).\n"
             "\n"
-            "HTML-fallback (парсинг zakupki.gov.ru) — только явный opt-in:\n"
-            "  MCP_ZAKUPKI_PROVIDERS=damia,gosplan,navodki,html_fallback\n"
+            "HTML-fallback удалён из open-клиента в v0.1.1 — используйте "
+            "hosted Pro или BYOK API-провайдеры.\n"
             "\n"
             "Документация: https://github.com/atomno-mcp/mcp-zakupki"
         ),

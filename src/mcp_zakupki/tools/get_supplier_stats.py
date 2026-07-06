@@ -1,4 +1,7 @@
-"""Tool `get_supplier_stats` — статистика по поставщику (SPEC §5.4)."""
+"""Tool `get_supplier_stats` — статистика по поставщику (Pro hosted).
+
+Агрегация удалена из BYOK open-path в v0.1.1 (moat). Только hosted API.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +12,7 @@ from ..cache import make_args_hash
 from ..context import ServiceContext
 from ..errors import McpZakupkiError, ValidationError
 from ..schemas import OrgHistorySummary
+from ..tier import require_atomno_key_for_analytics
 from ..validators import validate_inn, validate_ogrn
 
 _TOOL_NAME = "get_supplier_stats"
@@ -34,6 +38,8 @@ async def get_supplier_stats(
     pf = period_from or _DEFAULT_FROM
     pt = period_to or date.today().isoformat()
 
+    require_atomno_key_for_analytics(ctx)
+
     ident = inn_n or ogrn_n or ""
     args_hash = make_args_hash(
         {"inn": inn_n, "ogrn": ogrn_n, "period_from": pf, "period_to": pt, "role": "supplier"}
@@ -53,9 +59,11 @@ async def get_supplier_stats(
         return summary
 
     try:
-        summary = await ctx.resolver.get_supplier_stats(
-            inn=inn_n, ogrn=ogrn_n, period_from=pf, period_to=pt
+        assert ctx.hosted is not None
+        raw = await ctx.hosted.get_supplier_stats(
+            {"inn": inn_n, "ogrn": ogrn_n, "period_from": pf, "period_to": pt}
         )
+        summary = OrgHistorySummary.model_validate(raw)
     except McpZakupkiError as exc:
         await ctx.cache.write_audit(
             _TOOL_NAME,

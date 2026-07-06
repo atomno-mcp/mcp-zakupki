@@ -10,12 +10,20 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import __version__
+
 DEFAULT_CACHE_FILENAME = "mcp_zakupki_cache.sqlite"
 # API-only default chain (legal-first: no HTML scraping unless explicitly opted in).
 DEFAULT_PROVIDER_CHAIN = ("damia", "gosplan", "navodki")
-DEFAULT_USER_AGENT = "atomno-mcp-zakupki/0.1.0 (+https://github.com/atomno-labs/mcp-zakupki)"
+DEFAULT_USER_AGENT = f"atomno-mcp-zakupki/{__version__} (+https://github.com/atomno-mcp/mcp-zakupki)"
 DEFAULT_RPS = 30
 DEFAULT_HTTP_TIMEOUT = 30.0
+DEFAULT_BYOK_DAILY_LIMIT = 10
+
+ENV_ATOMNO_API_KEY = "MCP_ZAKUPKI_ATOMNO_API_KEY"
+ENV_ATOMNO_API_KEY_LEGACY = "MCP_ZAKUPKI_API_KEY"
+# Deprecated v0.1.1 — html_fallback удалён из open-клиента; env игнорируется.
+ENV_ALLOW_HTML = "MCP_ZAKUPKI_ALLOW_HTML_SCRAPING"
 
 
 @dataclass(frozen=True)
@@ -44,7 +52,17 @@ class AppConfig:
     user_agent: str = DEFAULT_USER_AGENT
     http_proxy: str | None = None
     log_level: str = "INFO"
+    allow_html_scraping: bool = False
+    byok_daily_limit: int = DEFAULT_BYOK_DAILY_LIMIT
     extra: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def atomno_api_key(self) -> str | None:
+        return self.providers.pro_api_key
+
+    @property
+    def hosted_mode_enabled(self) -> bool:
+        return bool(self.atomno_api_key)
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> AppConfig:
@@ -60,8 +78,29 @@ class AppConfig:
             else DEFAULT_PROVIDER_CHAIN
         )
 
+        allow_html = False  # v0.1.1: html_fallback удалён; MCP_ZAKUPKI_ALLOW_HTML_SCRAPING игнорируется
+        if _truthy(e.get(ENV_ALLOW_HTML)):
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "%s игнорируется: html_fallback удалён из open-клиента v0.1.1.",
+                ENV_ALLOW_HTML,
+            )
+        chain = _normalize_chain(chain)
+
         rps_raw = e.get("MCP_ZAKUPKI_RPS")
         rps = int(rps_raw) if rps_raw and rps_raw.isdigit() else DEFAULT_RPS
+
+        byok_limit_raw = e.get("MCP_ZAKUPKI_BYOK_DAILY_LIMIT")
+        byok_limit = (
+            int(byok_limit_raw)
+            if byok_limit_raw and byok_limit_raw.isdigit()
+            else DEFAULT_BYOK_DAILY_LIMIT
+        )
+
+        atomno_key = _strip_or_none(e.get(ENV_ATOMNO_API_KEY)) or _strip_or_none(
+            e.get(ENV_ATOMNO_API_KEY_LEGACY)
+        )
 
         return cls(
             cache_db=cache_db,
@@ -75,7 +114,7 @@ class AppConfig:
                     "MCP_ZAKUPKI_EIS_BASE",
                     "https://int.zakupki.gov.ru/eis-integration/services",
                 ),
-                pro_api_key=_strip_or_none(e.get("MCP_ZAKUPKI_API_KEY")),
+                pro_api_key=atomno_key,
                 pro_base=e.get("MCP_ZAKUPKI_PRO_BASE", "https://api.atomno-mcp.ru/zakupki/v1"),
             ),
             chain=chain,
@@ -84,6 +123,8 @@ class AppConfig:
             user_agent=e.get("MCP_ZAKUPKI_USER_AGENT", DEFAULT_USER_AGENT),
             http_proxy=_strip_or_none(e.get("MCP_ZAKUPKI_HTTP_PROXY")),
             log_level=e.get("MCP_ZAKUPKI_LOG_LEVEL", "INFO"),
+            allow_html_scraping=allow_html,
+            byok_daily_limit=byok_limit,
         )
 
     def provider_status(self) -> dict[str, bool]:
@@ -94,17 +135,38 @@ class AppConfig:
             "gosplan": bool(p.gosplan_key),
             "navodki": bool(p.navodki_key),
             "eis_official": bool(p.eis_token),
-            "html_fallback": "html_fallback" in self.chain,
+            "atomno_hosted": self.hosted_mode_enabled,
         }
 
     @property
     def any_network_provider_configured(self) -> bool:
-        """True if at least one API/EIS provider can serve network tools."""
+        """True if hosted or at least one BYOK API provider can serve network tools."""
+        if self.hosted_mode_enabled:
+            return True
         status = self.provider_status()
         return any(
             status[k]
             for k in ("damia", "gosplan", "navodki", "eis_official")
         )
+
+
+def _normalize_chain(chain: tuple[str, ...]) -> tuple[str, ...]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for name in chain:
+        if name in seen:
+            continue
+        if name == "html_fallback":
+            continue
+        out.append(name)
+        seen.add(name)
+    return tuple(out)
+
+
+def _truthy(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _strip_or_none(value: str | None) -> str | None:

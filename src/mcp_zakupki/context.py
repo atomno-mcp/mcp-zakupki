@@ -12,6 +12,7 @@ from typing import Any
 
 from .cache import CacheStore
 from .config import AppConfig
+from .hosted_client import ZakupkiHostedClient
 from .providers import ProviderResolver
 
 logger = logging.getLogger(__name__)
@@ -26,10 +27,14 @@ class ServiceContext:
         *,
         cache: CacheStore | None = None,
         resolver: ProviderResolver | None = None,
+        hosted: ZakupkiHostedClient | None = None,
     ) -> None:
         self.config = config
         self.cache = cache or CacheStore(config.cache_db)
         self.resolver = resolver or ProviderResolver(config)
+        self.hosted = hosted
+        if config.hosted_mode_enabled and hosted is None:
+            self.hosted = ZakupkiHostedClient(config)
 
     @classmethod
     def from_env(cls) -> ServiceContext:
@@ -44,4 +49,6 @@ class ServiceContext:
 
     async def aclose(self) -> None:
         await self.resolver.aclose()
+        if self.hosted is not None:
+            await self.hosted.aclose()
         await self.cache.close()

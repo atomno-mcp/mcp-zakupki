@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import time
 
+from ..byok_limit import record_byok_usage
 from ..cache import make_args_hash
 from ..context import ServiceContext
 from ..errors import McpZakupkiError
@@ -32,6 +33,7 @@ from ..validators import (
     validate_price_range,
     validate_region_code,
 )
+from ..tier import enforce_byok_if_needed
 
 _TOOL_NAME = "search_tenders"
 
@@ -120,7 +122,12 @@ async def search_tenders(
         return result
 
     try:
-        result = await ctx.resolver.search_tenders(filter_)
+        if ctx.config.hosted_mode_enabled and ctx.hosted is not None:
+            result = await ctx.hosted.search_tenders(filter_)
+        else:
+            await enforce_byok_if_needed(ctx)
+            result = await ctx.resolver.search_tenders(filter_)
+            await record_byok_usage(ctx.cache, has_atomno_key=False)
     except McpZakupkiError as exc:
         await ctx.cache.write_audit(
             _TOOL_NAME,

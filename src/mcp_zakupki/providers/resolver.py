@@ -1,7 +1,8 @@
 """ProviderResolver — каскадный fallback по цепочке провайдеров.
 
-Из конфига `MCP_ZAKUPKI_PROVIDERS=damia,gosplan,navodki,html_fallback`
-строится список инстансов в порядке приоритета. На каждом MCP-вызове
+Из конфига `MCP_ZAKUPKI_PROVIDERS=damia,gosplan,navodki` строится список
+инстансов в порядке приоритета (API-only; HTML-scraping удалён из open-клиента
+в v0.1.1 — см. hosted Pro на api.atomno-mcp.ru). На каждом MCP-вызове
 резолвер обходит цепочку:
 
     1. Если провайдер не сконфигурирован (нет ключа) — пропускаем.
@@ -33,7 +34,6 @@ from ..errors import (
 from .base import BaseProvider, ProviderCapability
 from .damia import DamiaProvider
 from .gosplan import GosplanProvider
-from .html_fallback import HtmlFallbackProvider
 from .navodki import NavodkiProvider
 
 if TYPE_CHECKING:
@@ -44,11 +44,13 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+# html_fallback удалён из open-клиента v0.1.1 — только private -server/.
+_REMOVED_PROVIDERS = frozenset({"html_fallback"})
+
 _BUILTIN_BUILDERS: dict[str, Callable[[AppConfig], BaseProvider]] = {
     "damia": lambda cfg: DamiaProvider(cfg),
     "gosplan": lambda cfg: GosplanProvider(cfg),
     "navodki": lambda cfg: NavodkiProvider(cfg),
-    "html_fallback": lambda cfg: HtmlFallbackProvider(cfg),
 }
 
 
@@ -205,6 +207,12 @@ def _build_chain(config: AppConfig) -> list[BaseProvider]:
     seen: set[str] = set()
     for name in config.chain:
         if name in seen:
+            continue
+        if name in _REMOVED_PROVIDERS:
+            logger.warning(
+                "Провайдер %r удалён из open-клиента v0.1.1 (HTML-scraping — hosted Pro).",
+                name,
+            )
             continue
         builder = _BUILTIN_BUILDERS.get(name)
         if builder is None:

@@ -27,23 +27,24 @@
 | Скрипты на Python с `ftp.zakupki.gov.ru` сломались с января 2025 | Ищут замену через коммерческие API | Hybrid-провайдеры: DaMIA, ГосПлан API v2, navodki; опц. ЕИС-токен |
 | AI-агент не может прочитать тендер сам | Копи-паст в чат | `get_tender(reg_number)` отдаёт всю карточку как JSON |
 
-## Что внутри (open-клиент, бесплатно)
+## Что внутри (open-клиент)
 
-5 инструментов, доступных любому MCP-клиенту:
+| Tool | Tier | Что делает |
+|---|---|---|
+| `search_tenders` | **BYOK** (advanced) | Поиск тендеров по 30+ фильтрам. Требует API-ключ DaMIA / ГосПлан / navodki. |
+| `get_tender` | **BYOK** (advanced) | Карточка тендера по реестровому номеру. Требует API-ключ провайдера. |
+| `lookup_okpd2` | **Free** | Поиск кода ОКПД2 / КТРУ по тексту (локальный справочник, без сети). |
+| `get_customer_history` | **Pro hosted** | История закупок заказчика — только `MCP_ZAKUPKI_API_KEY`. |
+| `get_supplier_stats` | **Pro hosted** | Статистика поставщика — только `MCP_ZAKUPKI_API_KEY`. |
 
-| Tool | Что делает |
-|---|---|
-| `search_tenders` | Поиск тендеров по 30+ фильтрам: 44-ФЗ / 223-ФЗ / 615-ПП, ОКПД2, КТРУ, регион, диапазон НМЦК, ЭТП, заказчик, статус, даты. До 100 объектов на вызов с пагинацией. |
-| `get_tender` | Полная карточка тендера по реестровому номеру: заказчик, документация, сроки, площадка, протоколы (если есть), победитель и итоговая цена. |
-| `get_customer_history` | История закупок заказчика (по ИНН/ОГРН): объём, средний контракт, топ-ОКПД2, доля СМП, топ-победителей. |
-| `get_supplier_stats` | Статистика поставщика: победы / поражения / РНП-статус / отрасли / регионы / средний дисконт от НМЦК. |
-| `lookup_okpd2` | Поиск кода ОКПД2 / КТРУ по тексту запроса (полнотекстовый, локальный). |
+> **Production:** рекомендуется hosted API Atomno (`MCP_ZAKUPKI_API_KEY` на
+> [`api.atomno-mcp.ru/zakupki/`](https://atomno-mcp.ru/pricing#zakupki-pro)).
+> BYOK-путь (свой ключ DaMIA/ГосПлан) — **advanced/deprecated**: подходит для
+> разработки и пилотов, но не заменяет hosted-агрегацию и Pro-фичи.
 
-> **Pro-функции** (`summarize_tender_risks`, `predict_win_probability`,
-> `subscribe_watchlist`, `ask_44fz_223fz`, `batch_search_tenders`)
-> требуют `MCP_ZAKUPKI_API_KEY` от
-> [`api.atomno-mcp.ru/zakupki/`](https://atomno-labs.ru). Запускаются после
-> текущего спринта — открытая beta для пилотов.
+> **v0.1.1 security:** HTML-scraping `zakupki.gov.ru` (`html_fallback`) **удалён**
+> из open-клиента. Агрегирующие тулы (`get_customer_history`,
+> `get_supplier_stats`) не работают через BYOK — только hosted Pro.
 
 ## Quick start
 
@@ -67,19 +68,18 @@ pip install atomno-mcp-zakupki
 pip install "atomno-mcp-zakupki[eis-official]"
 ```
 
-### 2. Конфигурация (минимум — ключ одного API-провайдера)
+### 2. Конфигурация
 
-По умолчанию `atomno-mcp-zakupki` использует **только легальные API-источники**
-(DaMIA, ГосПлан, navodki, опц. официальный ЕИС-токен). Без ключей работает
-только `lookup_okpd2` (локальный справочник ОКПД2).
+**Для production** — получите hosted Pro-ключ:
+[`atomno-mcp.ru/pricing#zakupki-pro`](https://atomno-mcp.ru/pricing#zakupki-pro)
+→ `MCP_ZAKUPKI_API_KEY`.
 
-Для поиска тендеров и карточек добавьте ключ хотя бы одного провайдера
-в `.env` или переменные окружения. Полный список — в `.env.example`.
+**Для разработки (BYOK, deprecated)** — ключ одного API-провайдера
+(DaMIA / ГосПлан / navodki) для `search_tenders` и `get_tender`.
+Без ключей работает только `lookup_okpd2` (локальный справочник ОКПД2).
 
-> **HTML-fallback** (парсинг публичных страниц `zakupki.gov.ru`) **не включён
-> по умолчанию** — только явный opt-in через
-> `MCP_ZAKUPKI_PROVIDERS=...,html_fallback`. Используйте на свой риск и
-> соблюдайте robots/ToS портала.
+> **HTML-fallback удалён в v0.1.1.** Парсинг `zakupki.gov.ru` без API —
+> только на hosted backend (private server, Phase 2).
 
 | Переменная | Описание | Где взять |
 |---|---|---|
@@ -87,10 +87,10 @@ pip install "atomno-mcp-zakupki[eis-official]"
 | `MCP_ZAKUPKI_GOSPLAN_KEY` | API-ключ ГосПлан API v2 | <https://wiki.gosplan.info> (sandbox без регистрации: `fz44test.gosplan.info`) |
 | `MCP_ZAKUPKI_NAVODKI_KEY` | API-ключ navodki.ru | <https://navodki.ru> |
 | `MCP_ZAKUPKI_EIS_TOKEN` | Токен ЕИС (через `pmd/auth/welcome`) | <https://zakupki.gov.ru/pmd/auth/welcome> + сертификат Минфина |
-| `MCP_ZAKUPKI_API_KEY` | Ключ Pro-режима atomno | <https://app.atomno-labs.ru/zakupki> (после публичного запуска) |
+| `MCP_ZAKUPKI_API_KEY` | **Pro hosted** — обязателен для `get_customer_history` / `get_supplier_stats` и будущих AI-тулов | <https://atomno-mcp.ru/pricing#zakupki-pro> |
 | `MCP_ZAKUPKI_LOG_LEVEL` | DEBUG / INFO / WARNING / ERROR / CRITICAL | по умолчанию `INFO` |
 | `MCP_ZAKUPKI_CACHE_DB` | Путь к SQLite-кэшу | по умолчанию `./mcp_zakupki_cache.sqlite` |
-| `MCP_ZAKUPKI_PROVIDERS` | Цепочка fallback'а через запятую | по умолчанию `damia,gosplan,navodki` (без HTML) |
+| `MCP_ZAKUPKI_PROVIDERS` | Цепочка fallback'а (BYOK) | по умолчанию `damia,gosplan,navodki` |
 | `MCP_ZAKUPKI_RPS` | Лимит запросов в минуту | по умолчанию `30` |
 
 ### 3. Подключение к Cursor
@@ -168,13 +168,13 @@ atomno-mcp-zakupki --transport http --host 127.0.0.1 --port 8765
 ← Все поля: заказчик, НМЦК, документация (PDF), сроки, площадка...
 ```
 
-### Анализ заказчика
+### Анализ заказчика (Pro)
 
 ```
 [Cursor]: Кто такой ИНН 7449023800? Покажи историю закупок за 2 года.
 
 → get_customer_history(inn="7449023800", period_from="2024-01-01")
-← Сводка: 142 тендера, 312 млн ₽, 38.7% СМП, топ-ОКПД2, топ-победителей.
+← Требуется MCP_ZAKUPKI_API_KEY (hosted Pro).
 ```
 
 ### Подбор кода ОКПД2
@@ -206,11 +206,10 @@ atomno-mcp-zakupki --transport sse --port 9000
 | **DaMIA API-Закупки** | Free «Старт» ≈ 100/мес → per-request | 44-ФЗ + 223-ФЗ + 615-ПП, методы `zakupka`, `contract`, `zsearch`, `customer`, `eruz`, `rnp` | Default 1-й (если есть `MCP_ZAKUPKI_DAMIA_KEY`) |
 | **ГосПлан API v2** | Free sandbox + платные планы | 44-ФЗ (Beta), 615-ПП (Pre1), 223-ФЗ (Pre2) | Fallback 2-й |
 | **navodki.ru** | Free | 44-ФЗ + 223-ФЗ | Fallback 3-й |
-| **HTML-fallback** | Free | Публичные страницы `printForm/viewXml.html?regNumber=...` | **Opt-in only** — добавьте `html_fallback` в `MCP_ZAKUPKI_PROVIDERS` |
-| **ЕИС-официальный** (опц.) | Free для физ.лица с токеном | SOAP-сервис `int.zakupki.gov.ru/eis-integration/services/getDocsIP` | Если есть `MCP_ZAKUPKI_EIS_TOKEN` + сертификат Минфина |
+| **ЕИС-официальный** (опц.) | Free для физ.лица с токеном | SOAP `int.zakupki.gov.ru` | Если есть `MCP_ZAKUPKI_EIS_TOKEN` |
 
-Цепочка fallback'а настраивается через `MCP_ZAKUPKI_PROVIDERS=damia,gosplan,navodki`.
-Для HTML-парсинга явно добавьте `,html_fallback` в конец цепочки.
+Цепочка BYOK: `MCP_ZAKUPKI_PROVIDERS=damia,gosplan,navodki`.
+HTML-scraping **удалён** в v0.1.1 — используйте hosted Pro.
 Если ни один не отвечает, тулза вернёт типизированную ошибку
 `provider_unavailable`.
 
@@ -219,12 +218,9 @@ atomno-mcp-zakupki --transport sse --port 9000
 ```
 AI-клиент (Cursor / Claude / Cline) ──MCP──▶ atomno-mcp-zakupki
                                               │
-                                              ├──▶ SQLite cache (TTL 1 ч / 6 ч / 24 ч)
-                                              ├──▶ DaMIA API
-                                              ├──▶ ГосПлан API v2
-                                              ├──▶ navodki.ru
-                                              ├──▶ EIS SOAP (опц., через токен Минфина)
-                                              └──▶ HTML-fallback (opt-in only)
+                                              ├──▶ lookup_okpd2 (offline)
+                                              ├──▶ BYOK API (search/get) — deprecated
+                                              └──▶ hosted Pro (api.atomno-mcp.ru) — production
 ```
 
 Все провайдеры реализуют общий `BaseProvider`-интерфейс. Ответы
@@ -250,11 +246,9 @@ ruff check src tests
 
 - Сервис **не аффилирован** с Министерством финансов РФ, ФАС, оператором ЕИС
   или конкретными ЭТП.
-- Данные ЕИС — общедоступные согласно 44-ФЗ ст. 4 ч. 1 и 223-ФЗ ст. 4 ч. 5.
-  Мы получаем их через **лицензированные API-провайдеры** или официальный
-  ЕИС-токен, а не через обход CAPTCHA или массовый scraping.
-- HTML-fallback (если явно включён) — экспериментальный режим; пользователь
-  несёт ответственность за соблюдение ToS `zakupki.gov.ru`.
+- Данные ЕИС получаем через **лицензированные API-провайдеры**, официальный
+  ЕИС-токен или **hosted backend** Atomno — не через scraping open-клиента.
+- HTML-fallback удалён из open-клиента в v0.1.1 (moat / compliance).
 - Используйте на свой риск. Решения о подаче заявок на тендеры — на
   ответственности пользователя.
 

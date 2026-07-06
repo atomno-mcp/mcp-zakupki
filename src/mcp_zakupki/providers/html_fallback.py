@@ -70,7 +70,7 @@ class HtmlFallbackProvider(BaseProvider):
 
     @property
     def is_configured(self) -> bool:
-        return True
+        return self._config.allow_html_scraping
 
     async def aclose(self) -> None:
         if self._owns_http:

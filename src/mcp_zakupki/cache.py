@@ -107,6 +107,11 @@ CREATE TABLE IF NOT EXISTS cache_meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS byok_daily_usage (
+    usage_date TEXT PRIMARY KEY,
+    count      INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
@@ -409,6 +414,25 @@ class CacheStore:
             (code, type_, parent_code, level, name, fts_text),
         )
         await self._db.commit()
+
+    # ---- BYOK daily limit (open-core moat) ------------------------------
+
+    async def get_byok_daily_count(self, usage_date: str) -> int:
+        row = await self._fetch_one(
+            "SELECT count FROM byok_daily_usage WHERE usage_date = ?",
+            (usage_date,),
+        )
+        return int(row[0]) if row else 0
+
+    async def increment_byok_daily_count(self, usage_date: str) -> int:
+        assert self._db is not None
+        await self._db.execute(
+            "INSERT INTO byok_daily_usage (usage_date, count) VALUES (?, 1) "
+            "ON CONFLICT(usage_date) DO UPDATE SET count = count + 1",
+            (usage_date,),
+        )
+        await self._db.commit()
+        return await self.get_byok_daily_count(usage_date)
 
     # ---- audit ---------------------------------------------------------
 
