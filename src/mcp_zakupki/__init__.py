@@ -9,4 +9,4 @@ HTML-scraping удалён из open-клиента в v0.1.1.
 Опционально EIS-official через extra `[eis-official]`.
 """
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"

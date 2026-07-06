@@ -253,7 +253,7 @@ ruff check src tests
 
 ## Лицензия
 
-[MIT](LICENSE) © 2026 atomno-labs.
+[MIT](LICENSE) © 2026 Atomno.
 
 ## Семья MCP-серверов atomno
 

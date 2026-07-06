@@ -4,6 +4,13 @@
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 версии — [SemVer](https://semver.org/lang/ru/).
 
+## [0.1.3] — 2026-07-06
+
+### Changed
+
+- Брендинг PyPI и публичной документации: `atomno-labs` → `Atomno` / `atomno-mcp`
+  (автор, copyright, контактные URL).
+
 ## [0.1.2] — 2026-07-06
 
 ### Changed
@@ -32,6 +39,7 @@
 
 Первый публичный релиз.
 
+[0.1.3]: https://github.com/atomno-mcp/mcp-zakupki/releases/tag/v0.1.3
 [0.1.2]: https://github.com/atomno-mcp/mcp-zakupki/releases/tag/v0.1.2
 [0.1.1]: https://github.com/atomno-mcp/mcp-zakupki/releases/tag/v0.1.1
 [0.1.0]: https://github.com/atomno-mcp/mcp-zakupki/releases/tag/v0.1.0
