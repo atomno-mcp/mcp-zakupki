@@ -61,7 +61,8 @@ mcp: FastMCP = FastMCP(
         "HTML-scraping удалён из open-клиента (v0.1.1). "
         "get_customer_history и get_supplier_stats — Pro hosted API "
         "(MCP_ZAKUPKI_API_KEY, https://atomno-mcp.ru/pricing#zakupki-pro). "
-        "Для production рекомендуется hosted API; BYOK — advanced/deprecated. "
+        "Для production рекомендуется корпоративный API Atomno; self-hosted с ключом "
+        "лицензированного провайдера — для разработки и пилотов. "
         "Pro-функции (AI-summary, win_probability, watch) — на api.atomno-mcp.ru."
     ),
 )
