@@ -1,4 +1,4 @@
-"""Тесты tier-gating Pro-тулов и BYOK-лимита (moat v0.1.1)."""
+"""Тесты hosted tier gating для Pro-тулов и fair-use лимита BYOK."""
 
 from __future__ import annotations
 

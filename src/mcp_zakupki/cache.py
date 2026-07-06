@@ -415,7 +415,7 @@ class CacheStore:
         )
         await self._db.commit()
 
-    # ---- BYOK daily limit (open-core moat) ------------------------------
+    # ---- BYOK daily fair-use limit --------------------------------------
 
     async def get_byok_daily_count(self, usage_date: str) -> int:
         row = await self._fetch_one(

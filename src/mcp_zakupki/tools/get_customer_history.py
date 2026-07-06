@@ -1,6 +1,6 @@
 """Tool `get_customer_history` — история закупок заказчика (Pro hosted).
 
-Агрегация удалена из BYOK open-path в v0.1.1 (moat). Только hosted API.
+Агрегированная аналитика доступна только через hosted tier (корпоративный API).
 """
 
 from __future__ import annotations

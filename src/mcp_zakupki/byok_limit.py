@@ -1,4 +1,4 @@
-"""Дневной лимит BYOK-запросов без Atomno API-ключа (open-core moat v0.1.1)."""
+"""Дневной fair-use лимит BYOK-запросов без корпоративного Atomno API-ключа."""
 
 from __future__ import annotations
 

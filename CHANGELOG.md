@@ -4,6 +4,12 @@
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 версии — [SemVer](https://semver.org/lang/ru/).
 
+## [0.1.2] — 2026-07-06
+
+### Changed
+
+- Нейтральная публичная документация и комментарии в коде (compliance / fair-use framing).
+
 ## [0.1.1] — 2026-07-06
 
 ### Fixed
@@ -26,5 +32,6 @@
 
 Первый публичный релиз.
 
+[0.1.2]: https://github.com/atomno-mcp/mcp-zakupki/releases/tag/v0.1.2
 [0.1.1]: https://github.com/atomno-mcp/mcp-zakupki/releases/tag/v0.1.1
 [0.1.0]: https://github.com/atomno-mcp/mcp-zakupki/releases/tag/v0.1.0
