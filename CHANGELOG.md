@@ -8,18 +8,19 @@
 
 ### Fixed
 
-- **Open-core moat**: `html_fallback` (парсинг zakupki.gov.ru) отключён по умолчанию.
-  Включается только при `MCP_ZAKUPKI_ALLOW_HTML_SCRAPING=1` **и** явном
-  `html_fallback` в `MCP_ZAKUPKI_PROVIDERS` (на свой риск / правовые ограничения).
-- `get_customer_history` / `get_supplier_stats` — только hosted API
-  (`MCP_ZAKUPKI_ATOMNO_API_KEY`); BYOK-провайдеры больше не обслуживают аналитику.
-- При `MCP_ZAKUPKI_ATOMNO_API_KEY` — thin-client к `api.atomno-mcp.ru/zakupki/v1`
-  для `search_tenders` / `get_tender` (hosted backend в разработке → понятная ошибка).
-- BYOK без Atomno-ключа: дневной лимит **10 сетевых запросов** (`MCP_ZAKUPKI_BYOK_DAILY_LIMIT`).
+- Убран неофициальный HTML-парсинг ЕИС: ненадёжный путь, не соответствующий ToS реестра
+  (см. README). Опциональный fallback — только при явной настройке провайдеров и env.
+- `get_customer_history` / `get_supplier_stats` работают через корпоративный API endpoint
+  (`MCP_ZAKUPKI_ATOMNO_API_KEY`); для агрегированной аналитики нужен договорённый провайдер данных.
+- Корпоративный endpoint `api.atomno-mcp.ru/zakupki/v1` для `search_tenders` / `get_tender`
+  (бета; при отсутствии backend — понятное сообщение вместо тихого падения).
+- Fair-use: дневной лимит **10 сетевых запросов** в демо-режиме без корпоративного ключа
+  (`MCP_ZAKUPKI_BYOK_DAILY_LIMIT`).
 
 ### Changed
 
-- Рекомендуемый путь: hosted API-ключ. BYOK Damia/Gosplan/navodki — deprecated side-path.
+- Документация: рекомендуемый production-путь — корпоративный API-ключ Atomno или ключи
+  лицензированных провайдеров (Damia, ГосПлан, navodki).
 
 ## [0.1.0] — 2026-07-06
 

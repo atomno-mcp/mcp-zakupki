@@ -31,20 +31,19 @@
 
 | Tool | Tier | Что делает |
 |---|---|---|
-| `search_tenders` | **BYOK** (advanced) | Поиск тендеров по 30+ фильтрам. Требует API-ключ DaMIA / ГосПлан / navodki. |
-| `get_tender` | **BYOK** (advanced) | Карточка тендера по реестровому номеру. Требует API-ключ провайдера. |
+| `search_tenders` | **Self-hosted** | Поиск тендеров по 30+ фильтрам. Требует API-ключ DaMIA / ГосПлан / navodki. |
+| `get_tender` | **Self-hosted** | Карточка тендера по реестровому номеру. Требует API-ключ провайдера. |
 | `lookup_okpd2` | **Free** | Поиск кода ОКПД2 / КТРУ по тексту (локальный справочник, без сети). |
 | `get_customer_history` | **Pro hosted** | История закупок заказчика — только `MCP_ZAKUPKI_API_KEY`. |
 | `get_supplier_stats` | **Pro hosted** | Статистика поставщика — только `MCP_ZAKUPKI_API_KEY`. |
 
-> **Production:** рекомендуется hosted API Atomno (`MCP_ZAKUPKI_API_KEY` на
+> **Production:** рекомендуется корпоративный API Atomno (`MCP_ZAKUPKI_API_KEY` на
 > [`api.atomno-mcp.ru/zakupki/`](https://atomno-mcp.ru/pricing#zakupki-pro)).
-> BYOK-путь (свой ключ DaMIA/ГосПлан) — **advanced/deprecated**: подходит для
-> разработки и пилотов, но не заменяет hosted-агрегацию и Pro-фичи.
+> Self-hosted (свой ключ DaMIA/ГосПлан) — для разработки и пилотов; агрегированная
+> аналитика и расширенные отчёты доступны через корпоративный endpoint.
 
-> **v0.1.1 security:** HTML-scraping `zakupki.gov.ru` (`html_fallback`) **удалён**
-> из open-клиента. Агрегирующие тулы (`get_customer_history`,
-> `get_supplier_stats`) не работают через BYOK — только hosted Pro.
+> **v0.1.1:** убран неофициальный HTML-парсинг ЕИС. Инструменты `get_customer_history`
+> и `get_supplier_stats` требуют корпоративного API-ключа.
 
 ## Quick start
 
@@ -74,7 +73,7 @@ pip install "atomno-mcp-zakupki[eis-official]"
 [`atomno-mcp.ru/pricing#zakupki-pro`](https://atomno-mcp.ru/pricing#zakupki-pro)
 → `MCP_ZAKUPKI_API_KEY`.
 
-**Для разработки (BYOK, deprecated)** — ключ одного API-провайдера
+**Для разработки (self-hosted)** — ключ одного API-провайдера
 (DaMIA / ГосПлан / navodki) для `search_tenders` и `get_tender`.
 Без ключей работает только `lookup_okpd2` (локальный справочник ОКПД2).
 
@@ -219,7 +218,7 @@ HTML-scraping **удалён** в v0.1.1 — используйте hosted Pro.
 AI-клиент (Cursor / Claude / Cline) ──MCP──▶ atomno-mcp-zakupki
                                               │
                                               ├──▶ lookup_okpd2 (offline)
-                                              ├──▶ BYOK API (search/get) — deprecated
+                                              ├──▶ Self-hosted API (search/get)
                                               └──▶ hosted Pro (api.atomno-mcp.ru) — production
 ```
 
@@ -248,7 +247,7 @@ ruff check src tests
   или конкретными ЭТП.
 - Данные ЕИС получаем через **лицензированные API-провайдеры**, официальный
   ЕИС-токен или **hosted backend** Atomno — не через scraping open-клиента.
-- HTML-fallback удалён из open-клиента в v0.1.1 (moat / compliance).
+- HTML-fallback убран в v0.1.1 (соответствие ToS реестра закупок).
 - Используйте на свой риск. Решения о подаче заявок на тендеры — на
   ответственности пользователя.
 
