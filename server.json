@@ -1,0 +1,23 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.atomno-mcp/mcp-zakupki",
+  "description": "MCP server for Russian government procurement data (44-FZ / 223-FZ / 615-PP).",
+  "repository": {
+    "url": "https://github.com/atomno-mcp/mcp-zakupki",
+    "source": "github"
+  },
+  "version": "0.1.3",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "atomno-mcp-zakupki",
+      "version": "0.1.3",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": []
+    }
+  ]
+}
