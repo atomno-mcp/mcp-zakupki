@@ -1,4 +1,8 @@
 {
   "$schema": "https://glama.ai/mcp/schemas/server.json",
-  "maintainers": ["atomnos"]
+  "maintainers": [
+    "atomnos"
+  ],
+  "name": "mcp-zakupki",
+  "description": "MCP server for Russian government procurement data (44-FZ / 223-FZ / 615-PP)."
 }
