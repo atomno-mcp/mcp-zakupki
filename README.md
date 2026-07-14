@@ -1,3 +1,4 @@
+<!-- mcp-name: io.github.atomno-mcp/mcp-zakupki -->
 # atomno-mcp-zakupki
 
 > **MCP server for Russian government procurement data** (44-FZ / 223-FZ /
