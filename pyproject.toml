@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "atomno-mcp-zakupki"
-version = "0.1.4"
+version = "0.1.6"
 description = "MCP-сервер для российских госзакупок (zakupki.gov.ru, 44-ФЗ / 223-ФЗ / 615-ПП): поиск тендеров, карточки, история заказчиков и поставщиков, справочник ОКПД2."
 readme = "README.md"
 requires-python = ">=3.11"
