@@ -1,19 +1,15 @@
 <!-- mcp-name: io.github.atomno-mcp/mcp-zakupki -->
+
 # atomno-mcp-zakupki
 
-> **MCP server for Russian government procurement data** (44-FZ / 223-FZ /
-> 615-PP) — find tenders, customer/supplier history, OKPD2 lookup directly
-> from Cursor, Claude Desktop, Cline, Goose and any MCP-compatible client.
+MCP-сервер госзакупок: поиск тендеров на [zakupki.gov.ru](https://zakupki.gov.ru), история заказчиков и поставщиков, справочник ОКПД2. Законы 44-ФЗ, 223-ФЗ и 615-ПП — прямо в Cursor, Claude и любом клиенте MCP.
+
+Russian public procurement search for AI agents.
 
 [![PyPI version](https://img.shields.io/pypi/v/atomno-mcp-zakupki.svg)](https://pypi.org/project/atomno-mcp-zakupki/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![MCP](https://img.shields.io/badge/MCP-2025--06--18-purple.svg)](https://modelcontextprotocol.io)
-
-`atomno-mcp-zakupki` — это [MCP](https://modelcontextprotocol.io)-сервер
-(Model Context Protocol — открытый протокол подключения LLM-клиентов к
-внешним инструментам), который превращает портал ЕИС
-[`zakupki.gov.ru`](https://zakupki.gov.ru) в набор тулзов для AI-ассистента.
 
 Установили локально, прописали в конфиге Cursor / Claude Desktop / Cline —
 и в одном промпте просите: *«Покажи свежие тендеры за сегодня по ОКПД2
