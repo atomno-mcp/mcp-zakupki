@@ -28,6 +28,7 @@ from ..errors import (
     ProviderUnavailableError,
     RateLimitedError,
 )
+from ..ru_ca import ssl_context_with_mintcifry
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ class HttpAdapter:
                 "timeout": self._config.http_timeout_s,
                 "headers": {"User-Agent": self._config.user_agent},
                 "follow_redirects": True,
+                "verify": ssl_context_with_mintcifry(),
             }
             if self._base_url is not None:
                 kwargs["base_url"] = self._base_url

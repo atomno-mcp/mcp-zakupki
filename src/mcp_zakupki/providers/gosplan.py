@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from ..config import AppConfig
-from ..errors import AuthFailedError, NotFoundError, ParseError
+from ..errors import AuthFailedError, NotFoundError, ParseError, ProviderUnavailableError
 from ..schemas import (
     Customer,
     LawType,
@@ -39,6 +39,21 @@ if TYPE_CHECKING:
     from ..schemas import TenderSearchFilter
 
 logger = logging.getLogger(__name__)
+
+
+def _raise_on_error_body(payload: dict[str, Any], provider: str) -> None:
+    """Отказ источника (поле ``error`` в теле при HTTP 200) — честная ошибка,
+
+    а не пустой список. Иначе отказ поставщика молча превратится в
+    «найдено 0» — то есть в выдумку.
+    """
+    err = payload.get("error") or payload.get("Ошибка")
+    if err:
+        raise ProviderUnavailableError(
+            f"{provider} не вернул данные: источник ответил ошибкой, "
+            "а не результатами. Пустой результат не выдаётся.",
+            details={"provider": provider, "upstream": str(err)[:200]},
+        )
 
 
 class GosplanProvider(BaseProvider):
@@ -94,6 +109,7 @@ class GosplanProvider(BaseProvider):
                 "ГосПлан: ожидался JSON-объект на /v2/notifications.",
                 details={"provider": "gosplan"},
             )
+        _raise_on_error_body(payload, "ГосПлан API v2")
         items = payload.get("items") or payload.get("data") or []
         tenders = [_parse_tender_summary(it) for it in items if isinstance(it, dict)]
         return SearchResult(

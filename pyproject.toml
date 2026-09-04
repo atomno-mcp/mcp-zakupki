@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "atomno-mcp-zakupki"
-version = "0.1.8"
+version = "0.1.9"
 description = "MCP-сервер для российских госзакупок (zakupki.gov.ru, 44-ФЗ / 223-ФЗ / 615-ПП): поиск тендеров, карточки, история заказчиков и поставщиков, справочник ОКПД2."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -86,7 +86,7 @@ mcp-zakupki = "mcp_zakupki.server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mcp_zakupki"]
-include = ["src/mcp_zakupki/py.typed"]
+include = ["src/mcp_zakupki/py.typed", "src/mcp_zakupki/data/russian_trusted_ca.pem"]
 
 [tool.hatch.build.targets.sdist]
 include = [

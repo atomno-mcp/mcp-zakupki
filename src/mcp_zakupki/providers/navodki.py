@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from ..config import AppConfig
-from ..errors import AuthFailedError, NotFoundError, ParseError
+from ..errors import AuthFailedError, NotFoundError, ParseError, ProviderUnavailableError
 from ..schemas import (
     Customer,
     LawType,
@@ -87,6 +87,13 @@ class NavodkiProvider(BaseProvider):
             raise ParseError(
                 "navodki.ru: ожидался JSON-объект на /tenders/search.",
                 details={"provider": "navodki"},
+            )
+        err = payload.get("error") or payload.get("Ошибка")
+        if err:
+            raise ProviderUnavailableError(
+                "navodki.ru не вернул данные: источник ответил ошибкой, "
+                "а не результатами. Пустой результат не выдаётся.",
+                details={"provider": "navodki", "upstream": str(err)[:200]},
             )
         items = payload.get("items") or payload.get("data") or []
         tenders = [_parse_tender(it, "navodki") for it in items if isinstance(it, dict)]

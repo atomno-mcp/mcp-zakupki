@@ -13,6 +13,20 @@ from pathlib import Path
 from . import __version__
 
 DEFAULT_CACHE_FILENAME = "mcp_zakupki_cache.sqlite"
+
+
+def user_data_dir(*, app: str = "atomno") -> Path:
+    if os.name == "nt":
+        root = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
+    else:
+        root = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
+    dest = root / app
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest
+
+
+def default_cache_db_path() -> Path:
+    return user_data_dir() / DEFAULT_CACHE_FILENAME
 # API-only default chain (legal-first: no HTML scraping unless explicitly opted in).
 DEFAULT_PROVIDER_CHAIN = ("damia", "gosplan", "navodki")
 DEFAULT_USER_AGENT = f"atomno-mcp-zakupki/{__version__} (+https://github.com/atomno-mcp/mcp-zakupki)"
@@ -69,7 +83,7 @@ class AppConfig:
         e = env if env is not None else os.environ
 
         cache_db_raw = e.get("MCP_ZAKUPKI_CACHE_DB")
-        cache_db = Path(cache_db_raw) if cache_db_raw else Path.cwd() / DEFAULT_CACHE_FILENAME
+        cache_db = Path(cache_db_raw) if cache_db_raw else default_cache_db_path()
 
         chain_raw = e.get("MCP_ZAKUPKI_PROVIDERS")
         chain = (

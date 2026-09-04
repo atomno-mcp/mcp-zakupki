@@ -1,1 +1,1 @@
-"""Vendored-данные пакета (справочники, seed)."""
+"""Bundled public CA certificates."""

@@ -24,6 +24,7 @@ project.json
 .env.local
 .env.production
 *.pem
+!src/mcp_zakupki/data/russian_trusted_ca.pem
 *.key
 secrets/
 

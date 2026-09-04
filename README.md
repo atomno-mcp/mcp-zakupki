@@ -85,7 +85,7 @@ pip install "atomno-mcp-zakupki[eis-official]"
 | `MCP_ZAKUPKI_EIS_TOKEN` | Токен ЕИС (через `pmd/auth/welcome`) | <https://zakupki.gov.ru/pmd/auth/welcome> + сертификат Минфина |
 | `MCP_ZAKUPKI_API_KEY` | **Pro hosted** — обязателен для `get_customer_history` / `get_supplier_stats` и будущих AI-тулов | <https://atomno-mcp.ru/pricing#zakupki-pro> |
 | `MCP_ZAKUPKI_LOG_LEVEL` | DEBUG / INFO / WARNING / ERROR / CRITICAL | по умолчанию `INFO` |
-| `MCP_ZAKUPKI_CACHE_DB` | Путь к SQLite-кэшу | по умолчанию `./mcp_zakupki_cache.sqlite` |
+| `MCP_ZAKUPKI_CACHE_DB` | Путь к SQLite-кэшу | каталог данных пользователя (`%LOCALAPPDATA%/atomno/` или `~/.local/share/atomno/`) |
 | `MCP_ZAKUPKI_PROVIDERS` | Цепочка fallback'а (BYOK) | по умолчанию `damia,gosplan,navodki` |
 | `MCP_ZAKUPKI_RPS` | Лимит запросов в минуту | по умолчанию `30` |
 

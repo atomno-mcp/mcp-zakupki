@@ -7,13 +7,13 @@
     "url": "https://github.com/atomno-mcp/mcp-zakupki",
     "source": "github"
   },
-  "version": "0.1.8",
+  "version": "0.1.9",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "atomno-mcp-zakupki",
-      "version": "0.1.8",
+      "version": "0.1.9",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"

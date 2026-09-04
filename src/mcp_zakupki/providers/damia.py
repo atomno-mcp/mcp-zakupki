@@ -20,7 +20,7 @@ from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
 
 from ..config import AppConfig
-from ..errors import AuthFailedError, NotFoundError, ParseError
+from ..errors import AuthFailedError, NotFoundError, ParseError, ProviderUnavailableError
 from ..schemas import (
     Customer,
     Document,
@@ -90,6 +90,7 @@ class DamiaProvider(BaseProvider):
             provider_name=self.info.label,
             params=params,
         )
+        _raise_if_not_data(payload, filter_.query or "")
         try:
             tenders = _parse_search_payload(payload)
         except (KeyError, TypeError, ValueError) as exc:
@@ -161,6 +162,7 @@ class DamiaProvider(BaseProvider):
             params=params,
             expected_404_to_not_found=True,
         )
+        _raise_if_not_data(payload, ident)
         try:
             return _parse_org_history_payload(
                 payload,
@@ -201,6 +203,7 @@ class DamiaProvider(BaseProvider):
             params=params,
             expected_404_to_not_found=True,
         )
+        _raise_if_not_data(payload, ident)
         try:
             return _parse_org_history_payload(
                 payload,
@@ -217,6 +220,31 @@ class DamiaProvider(BaseProvider):
 
 
 # ---- helpers --------------------------------------------------------------
+
+
+def _raise_if_not_data(payload: Any, ident: str) -> None:
+    """Отсечь отказ DaMIA до разбора, чтобы не выдать пустую сводку за реальную.
+
+    DaMIA на неверный/непринятый ключ и прочие отказы отвечает HTTP 200 с телом-
+    строкой («Ошибка: Неверный ключ (1)») или объектом с полем ``error``. Прежний
+    разбор молча превращал такой ответ в сводку с нулями и ``source: damia`` — то
+    есть отдавал клиенту выдумку. Здесь честно поднимаем «источник недоступен».
+    """
+    err: str | None = None
+    if isinstance(payload, str):
+        err = payload.strip() or "пустой ответ источника"
+    elif isinstance(payload, dict):
+        raw = payload.get("error") or payload.get("Ошибка")
+        if raw:
+            err = str(raw)
+    elif payload is None:
+        err = "пустой ответ источника"
+    if err is not None:
+        raise ProviderUnavailableError(
+            "DaMIA API-Закупки не вернул данные: источник не подтвердил доступ "
+            "по ключу. Ответ не является достоверными сведениями и не выдаётся.",
+            details={"provider": "damia", "inn": ident, "upstream": err[:200]},
+        )
 
 
 def _build_search_params(filter_: TenderSearchFilter, key: str) -> dict[str, Any]:
@@ -289,7 +317,7 @@ def _parse_search_payload(payload: Any) -> list[Tender]:
     elif isinstance(payload, list):
         items = payload
     else:
-        return []
+        raise ValueError("ожидался список/объект от DaMIA, получено иное")
     return [_parse_tender_summary(it) for it in items if isinstance(it, dict)]
 
 
@@ -378,7 +406,9 @@ def _parse_org_history_payload(
     period_to: str,
 ) -> OrgHistorySummary:
     """Best-effort: DaMIA отдаёт {tenders_total, sum_price, top_okpd, ...}."""
-    data = payload if isinstance(payload, dict) else {}
+    if not isinstance(payload, dict):
+        raise ValueError("ожидался JSON-объект от DaMIA, получено иное")
+    data = payload
     return OrgHistorySummary(
         org_inn=org_inn,
         org_role=org_role,  # type: ignore[arg-type]
