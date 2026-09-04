@@ -1,9 +1,8 @@
 """ProviderResolver — каскадный fallback по цепочке провайдеров.
 
-Из конфига `MCP_ZAKUPKI_PROVIDERS=damia,gosplan,navodki` строится список
-инстансов в порядке приоритета (API-only; HTML-scraping удалён из open-клиента
-в v0.1.1 — см. hosted Pro на api.atomno-mcp.ru). На каждом MCP-вызове
-резолвер обходит цепочку:
+Из конфига `MCP_ZAKUPKI_PROVIDERS=eis_public` (по умолчанию) строится список
+инстансов в порядке приоритета. Покупные посредники — только если явно
+указаны и задан ключ. На каждом MCP-вызове резолвер обходит цепочку:
 
     1. Если провайдер не сконфигурирован (нет ключа) — пропускаем.
     2. Если провайдер не поддерживает запрашиваемый capability — пропускаем.
@@ -33,6 +32,7 @@ from ..errors import (
 )
 from .base import BaseProvider, ProviderCapability
 from .damia import DamiaProvider
+from .eis_public import EisPublicProvider
 from .gosplan import GosplanProvider
 from .navodki import NavodkiProvider
 
@@ -48,6 +48,7 @@ T = TypeVar("T")
 _REMOVED_PROVIDERS = frozenset({"html_fallback"})
 
 _BUILTIN_BUILDERS: dict[str, Callable[[AppConfig], BaseProvider]] = {
+    "eis_public": lambda cfg: EisPublicProvider(cfg),
     "damia": lambda cfg: DamiaProvider(cfg),
     "gosplan": lambda cfg: GosplanProvider(cfg),
     "navodki": lambda cfg: NavodkiProvider(cfg),
@@ -189,6 +190,16 @@ class ProviderResolver:
                 )
                 last_exc = exc
                 continue
+        if isinstance(last_exc, ProviderUnavailableError) and last_exc.message_ru:
+            raise ProviderUnavailableError(
+                last_exc.message_ru,
+                details={
+                    "operation": op_name,
+                    "attempted": attempted,
+                    "last_error": type(last_exc).__name__,
+                    **last_exc.details,
+                },
+            ) from last_exc
         raise ProviderUnavailableError(
             f"Все провайдеры в цепочке исчерпаны для операции {op_name!r}.",
             details={
@@ -224,7 +235,7 @@ def _build_chain(config: AppConfig) -> list[BaseProvider]:
         logger.warning(
             "Цепочка провайдеров пуста — сетевые тулзы недоступны. "
             "Работает только lookup_okpd2 (локальный справочник). "
-            "Задайте MCP_ZAKUPKI_PROVIDERS и ключи провайдера."
+            "По умолчанию используйте eis_public (официальный сайт)."
         )
     return chain
 

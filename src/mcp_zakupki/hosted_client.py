@@ -96,8 +96,9 @@ class ZakupkiHostedClient:
             ) from exc
 
         if resp.status_code in (404, 501, 502, 503):
+            detail = _extract_detail(resp)
             raise HostedApiUnavailableError(
-                _COMING_SOON,
+                detail or _COMING_SOON,
                 details={"operation": path, "http_status": resp.status_code},
             )
         if resp.status_code >= 400:

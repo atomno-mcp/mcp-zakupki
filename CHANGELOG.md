@@ -6,6 +6,18 @@
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-04
+
+### Changed
+
+- Источник по умолчанию — официальный сайт `zakupki.gov.ru`: поиск, XML-карточка, карточка организации, статус в реестре недобросовестных поставщиков.
+- `get_customer_history` отдаёт название, регион и статус в реестре недобросовестных. Сводку объёмов официальный сайт не считает.
+- `get_supplier_stats` без токена машинного обмена ЕИС возвращает отказ с причиной.
+
+### Fixed
+
+- В обращении к опциональному коммерческому API параметр идентификатора заказчика приведён к ожидаемому `req`.
+
 ## [0.1.9] — 2026-09-04
 
 ### Fixed
@@ -48,6 +60,7 @@
 
 Первый публичный релиз.
 
+[0.2.0]: https://github.com/atomno-mcp/mcp-zakupki/releases/tag/v0.2.0
 [0.1.9]: https://github.com/atomno-mcp/mcp-zakupki/releases/tag/v0.1.9
 [0.1.3]: https://github.com/atomno-mcp/mcp-zakupki/releases/tag/v0.1.3
 [0.1.2]: https://github.com/atomno-mcp/mcp-zakupki/releases/tag/v0.1.2

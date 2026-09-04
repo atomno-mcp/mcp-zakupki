@@ -1,21 +1,19 @@
 """Реализации провайдеров данных ЕИС.
 
-Каждый провайдер — подкласс `BaseProvider` (см. `base.py`). Open-клиент
-v0.1.1+ поддерживает только API-источники (BYOK):
+Каждый провайдер — подкласс `BaseProvider` (см. `base.py`).
 
-    damia    — DaMIA API-Закупки (commercial)
-    gosplan  — ГосПлан API v2 (commercial / sandbox)
-    navodki  — navodki.ru (REST поверх ЕИС)
-    eis_official — официальный SOAP-сервис ЕИС (extra `[eis-official]`)
-
-HTML-scraping (`html_fallback`) удалён из open-клиента — только hosted Pro
-на private `-server/` (v0.2).
+    eis_public — публичные страницы и XML-печатные формы zakupki.gov.ru
+    damia      — DaMIA API-Закупки (отключён по умолчанию, нужен ключ)
+    gosplan    — ГосПлан API v2 (нужен ключ)
+    navodki    — navodki.ru (нужен ключ)
+    eis_official — SOAP ЕИС (extra `[eis-official]`, нужен токен)
 
 Цепочка fallback'а собирается в `ProviderResolver` (см. `resolver.py`).
 """
 
 from .base import BaseProvider, ProviderCapability
 from .damia import DamiaProvider
+from .eis_public import EisPublicProvider
 from .gosplan import GosplanProvider
 from .navodki import NavodkiProvider
 from .resolver import ProviderResolver
@@ -24,6 +22,7 @@ __all__ = [
     "BaseProvider",
     "ProviderCapability",
     "DamiaProvider",
+    "EisPublicProvider",
     "GosplanProvider",
     "NavodkiProvider",
     "ProviderResolver",

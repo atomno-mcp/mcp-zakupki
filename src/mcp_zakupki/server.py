@@ -56,14 +56,9 @@ mcp: FastMCP = FastMCP(
     instructions=(
         "Сервер для работы с порталом российских госзакупок zakupki.gov.ru "
         "(44-ФЗ, 223-ФЗ, 615-ПП). Open-tools: search_tenders, get_tender, "
-        "lookup_okpd2 (офлайн-справочник ОКПД2). Источники search/get — "
-        "только легальные API (DaMIA / ГосПлан / navodki) с BYOK-ключом; "
-        "HTML-scraping удалён из open-клиента (v0.1.1). "
-        "get_customer_history и get_supplier_stats — Pro hosted API "
-        "(MCP_ZAKUPKI_API_KEY, https://atomno-mcp.ru/pricing#zakupki-pro). "
-        "Для production рекомендуется корпоративный API Atomno; self-hosted с ключом "
-        "лицензированного провайдера — для разработки и пилотов. "
-        "Pro-функции (AI-summary, win_probability, watch) — на api.atomno-mcp.ru."
+        "get_customer_history (карточка организации и РНП), lookup_okpd2. "
+        "Источник по умолчанию — официальный сайт ЕИС. "
+        "get_supplier_stats без токена машинного обмена недоступна."
     ),
 )
 
@@ -225,10 +220,10 @@ async def get_customer_history(
     period_from: str | None = None,
     period_to: str | None = None,
 ) -> dict[str, Any]:
-    """История закупок заказчика по ИНН или ОГРН (Pro hosted API).
+    """Карточка заказчика по ИНН или ОГРН с официального сайта ЕИС.
 
-    Требует `MCP_ZAKUPKI_API_KEY`. Агрегация истории заказчика — Pro-функция;
-    open-клиент не выполняет её через BYOK-провайдеры.
+    Отдаёт реквизиты и статус в реестре недобросовестных поставщиков.
+    Сводку объёмов сайт без токена машинного обмена не считает.
 
     Args:
         inn: ИНН заказчика (10 цифр для юр.лица, 12 для ИП).
@@ -257,9 +252,10 @@ async def get_supplier_stats(
     period_from: str | None = None,
     period_to: str | None = None,
 ) -> dict[str, Any]:
-    """Статистика поставщика по ИНН или ОГРН (Pro hosted API).
+    """Сводка по поставщику.
 
-    Требует `MCP_ZAKUPKI_API_KEY`. Агрегация статистики поставщика — Pro-функция.
+    На официальном сайте без токена машинного обмена недоступна —
+    вернёт отказ с причиной, не пустые нули.
 
     Args:
         inn: ИНН поставщика.
@@ -343,11 +339,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "  MCP_ZAKUPKI_DAMIA_KEY    — API-ключ DaMIA (api.damia.ru/zakupki).\n"
             "  MCP_ZAKUPKI_GOSPLAN_KEY  — API-ключ ГосПлан API v2.\n"
             "  MCP_ZAKUPKI_NAVODKI_KEY  — API-ключ navodki.ru.\n"
-            "  MCP_ZAKUPKI_API_KEY      — Pro hosted API (обязателен для "
-            "get_customer_history / get_supplier_stats).\n"
+            "  MCP_ZAKUPKI_API_KEY      — Pro hosted API (не обязателен для "
+            "поиска и карточки на официальном сайте).\n"
             "\n"
-            "HTML-fallback удалён из open-клиента в v0.1.1 — используйте "
-            "hosted Pro или BYOK API-провайдеры.\n"
+            "По умолчанию источник — официальный сайт zakupki.gov.ru.\n"
             "\n"
             "Документация: https://github.com/atomno-mcp/mcp-zakupki"
         ),
@@ -463,13 +458,12 @@ def main(argv: list[str] | None = None) -> int:
             lines.append(f"    {name:<16} {'configured' if configured else 'not configured'}")
         if not cfg.any_network_provider_configured:
             lines.append(
-                "  WARN: ни один API-провайдер не настроен — "
+                "  WARN: ни один источник не настроен — "
                 "сетевые тулзы вернут provider_unavailable. "
-                "lookup_okpd2 работает офлайн. Добавьте MCP_ZAKUPKI_DAMIA_KEY "
-                "или другой ключ (см. README)."
+                "lookup_okpd2 работает офлайн. По умолчанию нужен eis_public."
             )
         else:
-            lines.append("OK: конфигурация валидна, есть хотя бы один API-провайдер.")
+            lines.append("OK: конфигурация валидна, есть официальный или иной источник.")
         sys.stdout.write("\n".join(lines) + "\n")
         return 0
 

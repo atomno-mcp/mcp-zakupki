@@ -141,15 +141,17 @@ class TestInvalidEnvBailsOutCleanly:
 
 
 class TestCheckConfig:
-    def test_check_config_exits_zero_without_api_keys(self, capsys) -> None:
+    def test_check_config_ok_without_paid_keys(self, capsys) -> None:
         code = main(["--check-config"])
         assert code == 0
         out = capsys.readouterr().out
         assert "atomno-mcp-zakupki" in out
         assert "provider_chain" in out
-        assert "WARN" in out
+        assert "eis_public" in out
+        assert "OK:" in out
+        assert "WARN" not in out
 
-    def test_check_config_shows_ok_when_damia_key_set(self, monkeypatch, capsys) -> None:
+    def test_check_config_shows_damia_when_key_set(self, monkeypatch, capsys) -> None:
         monkeypatch.setenv("MCP_ZAKUPKI_DAMIA_KEY", "test-key")
         code = main(["--check-config"])
         assert code == 0

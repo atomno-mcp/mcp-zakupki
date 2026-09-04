@@ -1,37 +1,64 @@
-"""Тесты hosted tier gating для Pro-тулов и fair-use лимита BYOK."""
+"""Тесты тулзов заказчика/поставщика без покупного ключа."""
 
 from __future__ import annotations
 
 import pytest
+import respx
+from httpx import Response
+
+ORG_HTML = """
+<div class="registry-entry__header">
+  <div class="registry-entry__header-mid__number">
+    <a>ПУБЛИЧНОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО "СБЕРБАНК РОССИИ"</a>
+  </div>
+  <div class="registry-entry__body-block">
+    <div class="registry-entry__body-title">ИНН</div>
+    <div class="registry-entry__body-value">7707083893</div>
+  </div>
+  <div class="registry-entry__body-block">
+    <div class="registry-entry__body-title">Местонахождение</div>
+    <div class="registry-entry__body-value">117312, Г.МОСКВА, УЛ. ВАВИЛОВА, Д.19</div>
+  </div>
+</div>
+"""
 
 
 @pytest.mark.asyncio
-async def test_customer_history_requires_pro_key(monkeypatch) -> None:
+async def test_customer_history_official_without_pro_key(monkeypatch) -> None:
     import mcp_zakupki.server as srv
 
     monkeypatch.delenv("MCP_ZAKUPKI_API_KEY", raising=False)
     monkeypatch.delenv("MCP_ZAKUPKI_ATOMNO_API_KEY", raising=False)
-    result = await srv.get_customer_history(inn="7707083893")
-    assert result["error"] == "pro_required"
-    assert "MCP_ZAKUPKI_ATOMNO_API_KEY" in result["message_ru"] or "Atomno" in result["message_ru"]
+    with respx.mock(assert_all_called=False) as router:
+        router.get("https://zakupki.gov.ru/epz/organization/search/results.html").mock(
+            return_value=Response(200, text=ORG_HTML)
+        )
+        router.get("https://zakupki.gov.ru/epz/dishonestsupplier/search/results.html").mock(
+            return_value=Response(200, text='<p class="noRecords">Поиск не дал результатов</p>')
+        )
+        result = await srv.get_customer_history(inn="7707083893")
+    assert result.get("error") is None
+    assert result["org_inn"] == "7707083893"
+    assert result["coverage"] == "identity"
+    assert result["source_provider"] == "eis_public"
+    assert "СБЕРБАНК" in (result.get("short_name") or "")
 
 
 @pytest.mark.asyncio
-async def test_supplier_stats_requires_pro_key(monkeypatch) -> None:
+async def test_supplier_stats_refuses_without_paid_source(monkeypatch) -> None:
     import mcp_zakupki.server as srv
 
     monkeypatch.delenv("MCP_ZAKUPKI_API_KEY", raising=False)
     monkeypatch.delenv("MCP_ZAKUPKI_ATOMNO_API_KEY", raising=False)
+    monkeypatch.delenv("MCP_ZAKUPKI_DAMIA_KEY", raising=False)
     result = await srv.get_supplier_stats(inn="7707083893")
-    assert result["error"] == "pro_required"
+    assert result["error"] == "provider_unavailable"
+    assert "машинного обмена" in result["message_ru"]
 
 
 @pytest.mark.asyncio
-async def test_customer_history_with_pro_key_hosted_unavailable(monkeypatch) -> None:
+async def test_customer_history_with_pro_key_uses_hosted(monkeypatch) -> None:
     import os
-
-    import respx
-    from httpx import Response
 
     import mcp_zakupki.server as srv
     from mcp_zakupki.config import AppConfig

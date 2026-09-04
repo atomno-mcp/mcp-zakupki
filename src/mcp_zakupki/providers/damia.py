@@ -151,7 +151,7 @@ class DamiaProvider(BaseProvider):
                 "DaMIA: для get_customer_history нужен ИНН или ОГРН.",
                 details={"provider": "damia"},
             )
-        params: dict[str, Any] = {"inn": ident, "key": key}
+        params: dict[str, Any] = {"req": ident, "key": key}
         if period_from:
             params["from"] = period_from
         if period_to:

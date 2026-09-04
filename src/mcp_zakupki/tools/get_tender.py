@@ -53,13 +53,15 @@ async def get_tender(
                 include_protocols=include_protocols,
             )
         else:
-            await enforce_byok_if_needed(ctx)
+            if _uses_paid_byok(ctx):
+                await enforce_byok_if_needed(ctx)
             tender = await ctx.resolver.get_tender(
                 norm_reg,
                 include_documents=include_documents,
                 include_protocols=include_protocols,
             )
-            await record_byok_usage(ctx.cache, has_atomno_key=False)
+            if _uses_paid_byok(ctx):
+                await record_byok_usage(ctx.cache, has_atomno_key=False)
     except McpZakupkiError as exc:
         await ctx.cache.write_audit(
             _TOOL_NAME,
@@ -101,6 +103,11 @@ async def get_tender(
         latency_ms=elapsed,
     )
     return tender
+
+
+def _uses_paid_byok(ctx: ServiceContext) -> bool:
+    status = ctx.config.provider_status()
+    return any(status[k] for k in ("damia", "gosplan", "navodki", "eis_official"))
 
 
 __all__ = ["get_tender"]

@@ -14,6 +14,7 @@ from mcp_zakupki.errors import (
 )
 from mcp_zakupki.providers import (
     DamiaProvider,
+    EisPublicProvider,
     GosplanProvider,
     NavodkiProvider,
     ProviderResolver,
@@ -58,6 +59,11 @@ class TestProviderInfo:
 
     def test_navodki_unconfigured(self) -> None:
         assert NavodkiProvider(_cfg()).is_configured is False
+
+    def test_eis_public_always_configured(self) -> None:
+        p = EisPublicProvider(_cfg())
+        assert p.is_configured is True
+        assert p.info.name == "eis_public"
 
 
 @pytest.mark.asyncio
@@ -117,18 +123,38 @@ class TestDamiaSearch:
                 with pytest.raises(NotFoundError):
                     await p.get_tender("0173100007426000018")
 
+    async def test_customer_sends_req_not_inn(self) -> None:
+        cfg = _cfg(damia_key="test-key")
+        with respx.mock(assert_all_called=False) as router:
+            route = router.get("https://api.damia.ru/zakupki/customer").mock(
+                return_value=Response(
+                    200,
+                    json={"name": "Тест", "tenders_total": 1, "sum_price": "10"},
+                )
+            )
+            async with DamiaProvider(cfg) as p:
+                await p.get_customer_history(inn="7707083893")
+        assert route.called
+        assert route.calls[0].request.url.params.get("req") == "7707083893"
+        assert "inn" not in route.calls[0].request.url.params
+
 
 @pytest.mark.asyncio
 class TestResolverFallback:
-    async def test_api_chain_without_keys_raises_unavailable(self) -> None:
+    async def test_default_chain_is_official(self) -> None:
         cfg = _cfg()
+        async with ProviderResolver(cfg) as resolver:
+            names = [p.name for p in resolver.chain]
+        assert names == ["eis_public"]
+
+    async def test_paid_chain_without_keys_skips_to_end(self) -> None:
+        cfg = _cfg(chain=("damia", "gosplan", "navodki"))
         async with ProviderResolver(cfg) as resolver:
             with pytest.raises(ProviderUnavailableError) as exc_info:
                 await resolver.search_tenders(TenderSearchFilter())
             details = exc_info.value.details
             attempted_names = {a["provider"] for a in details["attempted"]}
             assert attempted_names == {"damia", "gosplan", "navodki"}
-            assert "html_fallback" not in attempted_names
 
     async def test_html_fallback_removed_from_open_client(self) -> None:
         cfg = _cfg(chain=("html_fallback", "damia"))
@@ -136,3 +162,9 @@ class TestResolverFallback:
             names = [p.name for p in resolver.chain]
         assert names == ["damia"]
         assert "html_fallback" not in names
+
+    async def test_damia_last_if_explicit(self) -> None:
+        cfg = _cfg(chain=("eis_public", "damia"), damia_key="k")
+        async with ProviderResolver(cfg) as resolver:
+            names = [p.name for p in resolver.chain]
+        assert names == ["eis_public", "damia"]

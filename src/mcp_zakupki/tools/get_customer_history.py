@@ -1,6 +1,7 @@
-"""Tool `get_customer_history` — история закупок заказчика (Pro hosted).
+"""Tool `get_customer_history` — карточка заказчика и статус в реестре РНП.
 
-Агрегированная аналитика доступна только через hosted tier (корпоративный API).
+Официальный сайт отдаёт реквизиты организации. Сводку объёмов без токена
+машинного обмена не считает — это отражается в `coverage=identity`.
 """
 
 from __future__ import annotations
@@ -12,7 +13,6 @@ from ..cache import make_args_hash
 from ..context import ServiceContext
 from ..errors import McpZakupkiError, ValidationError
 from ..schemas import OrgHistorySummary
-from ..tier import require_atomno_key_for_analytics
 from ..validators import validate_inn, validate_ogrn
 
 _TOOL_NAME = "get_customer_history"
@@ -38,8 +38,6 @@ async def get_customer_history(
     pf = period_from or _DEFAULT_FROM
     pt = period_to or date.today().isoformat()
 
-    require_atomno_key_for_analytics(ctx)
-
     ident = inn_n or ogrn_n or ""
     args_hash = make_args_hash(
         {"inn": inn_n, "ogrn": ogrn_n, "period_from": pf, "period_to": pt, "role": "customer"}
@@ -59,11 +57,15 @@ async def get_customer_history(
         return summary
 
     try:
-        assert ctx.hosted is not None
-        raw = await ctx.hosted.get_customer_history(
-            {"inn": inn_n, "ogrn": ogrn_n, "period_from": pf, "period_to": pt}
-        )
-        summary = OrgHistorySummary.model_validate(raw)
+        if ctx.config.hosted_mode_enabled and ctx.hosted is not None:
+            raw = await ctx.hosted.get_customer_history(
+                {"inn": inn_n, "ogrn": ogrn_n, "period_from": pf, "period_to": pt}
+            )
+            summary = OrgHistorySummary.model_validate(raw)
+        else:
+            summary = await ctx.resolver.get_customer_history(
+                inn=inn_n, ogrn=ogrn_n, period_from=pf, period_to=pt
+            )
     except McpZakupkiError as exc:
         await ctx.cache.write_audit(
             _TOOL_NAME,

@@ -25,6 +25,7 @@ from ..schemas import (
     TenderSearchFilter,
     TenderStatus,
 )
+from ..tier import enforce_byok_if_needed
 from ..validators import (
     validate_date_range,
     validate_inn,
@@ -33,7 +34,6 @@ from ..validators import (
     validate_price_range,
     validate_region_code,
 )
-from ..tier import enforce_byok_if_needed
 
 _TOOL_NAME = "search_tenders"
 
@@ -125,9 +125,11 @@ async def search_tenders(
         if ctx.config.hosted_mode_enabled and ctx.hosted is not None:
             result = await ctx.hosted.search_tenders(filter_)
         else:
-            await enforce_byok_if_needed(ctx)
+            if _uses_paid_byok(ctx):
+                await enforce_byok_if_needed(ctx)
             result = await ctx.resolver.search_tenders(filter_)
-            await record_byok_usage(ctx.cache, has_atomno_key=False)
+            if _uses_paid_byok(ctx):
+                await record_byok_usage(ctx.cache, has_atomno_key=False)
     except McpZakupkiError as exc:
         await ctx.cache.write_audit(
             _TOOL_NAME,
@@ -209,6 +211,12 @@ def _coerce_statuses(values: list[str] | None) -> list[TenderStatus]:
         except ValueError:
             continue
     return out
+
+
+def _uses_paid_byok(ctx: ServiceContext) -> bool:
+    """Лимит 10/сутки — только если в цепочке живой покупной ключ."""
+    status = ctx.config.provider_status()
+    return any(status[k] for k in ("damia", "gosplan", "navodki", "eis_official"))
 
 
 __all__ = ["search_tenders"]

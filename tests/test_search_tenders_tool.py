@@ -10,7 +10,7 @@ from httpx import Response
 
 from mcp_zakupki.config import AppConfig
 from mcp_zakupki.context import ServiceContext
-from mcp_zakupki.errors import ProviderUnavailableError, ValidationError
+from mcp_zakupki.errors import ValidationError
 from mcp_zakupki.tools import search_tenders
 
 
@@ -31,10 +31,24 @@ class TestSearchTenders:
             with pytest.raises(ValidationError):
                 await search_tenders(ctx, price_min_rub=500, price_max_rub=100)
 
-    async def test_no_keys_yields_provider_unavailable(self, app_config) -> None:
-        async with ServiceContext(app_config) as ctx:
-            with pytest.raises(ProviderUnavailableError):
-                await search_tenders(ctx, query="портал")
+    async def test_official_source_without_keys(self, app_config) -> None:
+        with respx.mock(assert_all_called=False) as router:
+            router.get("https://zakupki.gov.ru/epz/order/extendedsearch/results.html").mock(
+                return_value=Response(
+                    200,
+                    text=(
+                        '<div class="registry-entry__header">'
+                        '<a href="?regNumber=0131200001026005946">x</a>'
+                        '<div class="registry-entry__body-value">Поставка бумаги</div>'
+                        "</div>"
+                    ),
+                )
+            )
+            async with ServiceContext(app_config) as ctx:
+                result = await search_tenders(ctx, query="бумага")
+        assert result.tenders
+        assert result.tenders[0].reg_number == "0131200001026005946"
+        assert result.search_meta.source == "eis_public"
 
     async def test_damia_with_key_returns_results(self, monkeypatch, tmp_path) -> None:
         monkeypatch.setenv("MCP_ZAKUPKI_DAMIA_KEY", "test-key")

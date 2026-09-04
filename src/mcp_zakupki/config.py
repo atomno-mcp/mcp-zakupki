@@ -27,8 +27,9 @@ def user_data_dir(*, app: str = "atomno") -> Path:
 
 def default_cache_db_path() -> Path:
     return user_data_dir() / DEFAULT_CACHE_FILENAME
-# API-only default chain (legal-first: no HTML scraping unless explicitly opted in).
-DEFAULT_PROVIDER_CHAIN = ("damia", "gosplan", "navodki")
+# Официальный публичный ЕИС первым. Покупные посредники — только если явно
+# указаны в MCP_ZAKUPKI_PROVIDERS и задан ключ.
+DEFAULT_PROVIDER_CHAIN = ("eis_public",)
 DEFAULT_USER_AGENT = f"atomno-mcp-zakupki/{__version__} (+https://github.com/atomno-mcp/mcp-zakupki)"
 DEFAULT_RPS = 30
 DEFAULT_HTTP_TIMEOUT = 30.0
@@ -145,6 +146,7 @@ class AppConfig:
         """Which network providers have credentials configured."""
         p = self.providers
         return {
+            "eis_public": "eis_public" in self.chain,
             "damia": bool(p.damia_key),
             "gosplan": bool(p.gosplan_key),
             "navodki": bool(p.navodki_key),
@@ -154,8 +156,10 @@ class AppConfig:
 
     @property
     def any_network_provider_configured(self) -> bool:
-        """True if hosted or at least one BYOK API provider can serve network tools."""
+        """True if hosted, official public EIS, or a BYOK provider can serve network tools."""
         if self.hosted_mode_enabled:
+            return True
+        if "eis_public" in self.chain:
             return True
         status = self.provider_status()
         return any(

@@ -227,9 +227,9 @@ class OrgHistorySummary(BaseModel):
     region_code: str | None = None
     period_from: str  # YYYY-MM-DD
     period_to: str  # YYYY-MM-DD
-    tenders_total: int = 0
-    tenders_completed: int = 0
-    tenders_cancelled: int = 0
+    tenders_total: int | None = None
+    tenders_completed: int | None = None
+    tenders_cancelled: int | None = None
     total_volume_rub: Decimal | None = None
     avg_contract_rub: Decimal | None = None
     median_contract_rub: Decimal | None = None
@@ -239,6 +239,8 @@ class OrgHistorySummary(BaseModel):
     top_customers: list[TopWinnerItem] = Field(default_factory=list)
     monthly_distribution: list[MonthlyStat] = Field(default_factory=list)
     rnp_status: Literal["clean", "in_rnp", "unknown"] = "unknown"
+    coverage: Literal["full", "identity"] = "full"
+    limitations: str | None = None
     fetched_at: datetime
     source_provider: str
 

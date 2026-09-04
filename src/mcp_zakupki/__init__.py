@@ -4,9 +4,8 @@ Open-клиент семьи `atomno-mcp-*`. Open-source MIT, Phase 0–2 по S
 (`_knowledge/specs/spec.md`). 5 публичных тулзов: search_tenders,
 get_tender, get_customer_history, get_supplier_stats, lookup_okpd2.
 
-Цепочка провайдеров по умолчанию (API-only): damia → gosplan → navodki.
-HTML-scraping удалён из open-клиента в v0.1.1.
-Опционально EIS-official через extra `[eis-official]`.
+Цепочка провайдеров по умолчанию: официальный сайт zakupki.gov.ru
+(`eis_public`). Покупные посредники — только если явно заданы.
 """
 
-__version__ = "0.1.9"
+__version__ = "0.2.0"
