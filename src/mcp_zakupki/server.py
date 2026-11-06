@@ -132,6 +132,7 @@ async def search_tenders(
     applications_deadline_to: str | None = None,
     limit: int = 20,
     next_page_token: str | None = None,
+    strict_filters: bool = False,
 ) -> dict[str, Any]:
     """Найти тендеры (44-ФЗ / 223-ФЗ / 615-ПП) по фильтрам в ЕИС zakupki.gov.ru.
 
@@ -180,6 +181,7 @@ async def search_tenders(
             applications_deadline_to=applications_deadline_to,
             limit=limit,
             next_page_token=next_page_token,
+            strict_filters=strict_filters,
         )
         return result.model_dump(mode="json")
     except McpZakupkiError as exc:
