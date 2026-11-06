@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from mcp_zakupki.cache import (
     CacheStore,
     make_args_hash,
+)
+from mcp_zakupki.schemas import (
+    Customer,
+    LawType,
+    Tender,
 )
 
 
@@ -55,6 +60,44 @@ class TestTenderCache:
         got = await cache.get_tender("0173100007426000018")
         assert got is not None
         assert got["provider"] == "damia"
+
+    @pytest.mark.parametrize(
+        "smp_only",
+        [None, False, True],
+    )
+    async def test_smp_only_round_trip(
+        self, cache: CacheStore, smp_only: bool | None
+    ) -> None:
+        """smp_only None / False / True сохраняется и читается без искажения.
+
+        None не должен превращаться в False.
+        """
+        tender = Tender(
+            reg_number="0173100007426000018",
+            law_type=LawType.FZ_44,
+            title="X",
+            customer=Customer(inn="7707083893", short_name="X"),
+            url_eis="https://example.ru/notice",
+            fetched_at=datetime.now(UTC),
+            source_provider="damia",
+            smp_only=smp_only,
+        )
+        raw = tender.model_dump(mode="json")
+        # none / false / true должны остаться такими в сериализованной модели
+        assert raw["smp_only"] is smp_only
+
+        await cache.put_tender(
+            tender.reg_number,
+            raw,
+            provider="damia",
+            smp_only=smp_only,
+        )
+        got = await cache.get_tender(tender.reg_number)
+        assert got is not None
+        restored = Tender.model_validate(got["tender"])
+        assert restored.smp_only is smp_only
+        if smp_only is None:
+            assert restored.smp_only is not False
 
 
 @pytest.mark.asyncio

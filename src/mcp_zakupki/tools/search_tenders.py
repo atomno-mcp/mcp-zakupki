@@ -59,6 +59,7 @@ async def search_tenders(
     applications_deadline_to: str | None = None,
     limit: int = 20,
     next_page_token: str | None = None,
+    strict_filters: bool = False,
 ) -> SearchResult:
     started = time.perf_counter()
 
@@ -93,6 +94,7 @@ async def search_tenders(
         price_max_rub=pmax,
         status=_coerce_statuses(status),
         smp_only=smp_only,
+        strict_filters=strict_filters,
         publish_date_from=pub_from.isoformat() if pub_from else None,
         publish_date_to=pub_to.isoformat() if pub_to else None,
         applications_deadline_from=apps_from.isoformat() if apps_from else None,
@@ -143,10 +145,16 @@ async def search_tenders(
         raise
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
+    old_meta = result.search_meta
     result.search_meta = SearchMeta(
         took_ms=elapsed_ms,
-        source=result.search_meta.source or "unknown",
+        source=old_meta.source or "unknown",
         cache_hit=False,
+        applied_filters=list(old_meta.applied_filters),
+        unsupported_filters=list(old_meta.unsupported_filters),
+        post_filtered=old_meta.post_filtered,
+        hydrated_tenders=old_meta.hydrated_tenders,
+        warnings=list(old_meta.warnings),
     )
 
     await ctx.cache.put_search(

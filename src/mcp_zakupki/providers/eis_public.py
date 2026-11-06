@@ -98,20 +98,68 @@ class EisPublicProvider(BaseProvider):
             await self._http.aclose()
 
     async def search_tenders(self, filter_: TenderSearchFilter) -> SearchResult:
-        params = _search_params(filter_)
+        applied_filters: list[str] = []
+        unsupported_filters: list[str] = []
+        warnings: list[str] = []
+
+        params = _search_params(filter_, applied_filters, unsupported_filters, warnings)
+
         text = await self._http.get_text(
             f"{_EIS_BASE}{_SEARCH_PATH}",
             provider_name=self.info.label,
             params=params,
         )
         tenders = parse_search_html(text)
+
+        # Локальная фильтрация по статусу
+        # post_filtered = true, если фильтр применён локально после ответа
+        # провайдера, независимо от количества исключённых записей.
+        post_filtered = bool(filter_.status)
+        if filter_.status:
+            # Статус применяется локально (EIS HTML-поиск не фильтрует по статусу).
+            # Фильтрация идёт по точному совпадению статусов. published НЕ считается
+            # applications_open, unknown исключается из результатов.
+            applied_filters.append("status")
+            requested_statuses = {s.value if hasattr(s, "value") else str(s) for s in filter_.status}
+            tenders = [t for t in tenders if t.status in requested_statuses]
+        # Удаляем status из unsupported_filters, так как он применён локально
+        if "status" in unsupported_filters:
+            unsupported_filters.remove("status")
+
+        # Проверяем strict_filters
+
+        # Проверяем strict_filters
+        strict_filters = getattr(filter_, "strict_filters", False)
+        if strict_filters and unsupported_filters:
+            from ..errors import ValidationError
+            raise ValidationError(
+                f"eis_public: запрошенные фильтры не могут быть надёжно применены: {unsupported_filters}",
+                details={"unsupported_filters": unsupported_filters},
+            )
+
+        if unsupported_filters:
+            warnings.append(
+                f"Следующие фильтры не поддерживаются eis_public и не применены: {unsupported_filters}"
+            )
+
+        hydrated = len(tenders)
+
         return SearchResult(
             query_echo=filter_.model_dump(mode="json"),
             total_estimated=None,
             page_size=len(tenders),
             next_page_token=_next_page(filter_, tenders),
             tenders=tenders,
-            search_meta=SearchMeta(took_ms=0, source="eis_public", cache_hit=False),
+            search_meta=SearchMeta(
+                took_ms=0,
+                source="eis_public",
+                cache_hit=False,
+                applied_filters=applied_filters,
+                unsupported_filters=unsupported_filters,
+                post_filtered=post_filtered,
+                hydrated_tenders=hydrated,
+                warnings=warnings,
+            ),
         )
 
     async def get_tender(
@@ -228,7 +276,12 @@ class EisPublicProvider(BaseProvider):
         )
 
 
-def _search_params(filter_: TenderSearchFilter) -> dict[str, Any]:
+def _search_params(
+    filter_: TenderSearchFilter,
+    applied_filters: list[str],
+    unsupported_filters: list[str],
+    warnings: list[str],
+) -> dict[str, Any]:
     page = 1
     if filter_.next_page_token and str(filter_.next_page_token).isdigit():
         page = max(1, int(filter_.next_page_token))
@@ -254,6 +307,65 @@ def _search_params(filter_: TenderSearchFilter) -> dict[str, Any]:
     if filter_.customer_inn and filter_.query:
         params["searchString"] = filter_.query
         params["customerInn"] = filter_.customer_inn
+        applied_filters.append("customer_inn")
+
+    # law_type — передаётся через fz44/fz223/ppRf615
+    applied_filters.append("law_type")
+
+    # query — передаётся через searchString
+    if filter_.query:
+        applied_filters.append("query")
+
+    # okpd2_codes — не передаются в EIS HTML search
+    if filter_.okpd2_codes:
+        unsupported_filters.append("okpd2_codes")
+
+    # ktru_codes — не передаются
+    if filter_.ktru_codes:
+        unsupported_filters.append("ktru_codes")
+
+    # regions — не передаются
+    if filter_.regions:
+        unsupported_filters.append("regions")
+
+    # customer_ogrn — не передаётся
+    if filter_.customer_ogrn:
+        unsupported_filters.append("customer_ogrn")
+
+    # platform — не передаётся
+    if filter_.platform:
+        unsupported_filters.append("platform")
+
+    # price_min_rub / price_max_rub — не передаются
+    if filter_.price_min_rub is not None:
+        unsupported_filters.append("price_min_rub")
+    if filter_.price_max_rub is not None:
+        unsupported_filters.append("price_max_rub")
+
+    # status — не передаётся напрямую (применяется локально)
+    if filter_.status:
+        unsupported_filters.append("status")
+
+    # smp_only — не передаётся
+    if filter_.smp_only is not None and filter_.smp_only:
+        unsupported_filters.append("smp_only")
+
+    # publish_date_from / publish_date_to — не передаются
+    if filter_.publish_date_from:
+        unsupported_filters.append("publish_date_from")
+    if filter_.publish_date_to:
+        unsupported_filters.append("publish_date_to")
+
+    # applications_deadline_from / to — не передаются
+    if filter_.applications_deadline_from:
+        unsupported_filters.append("applications_deadline_from")
+    if filter_.applications_deadline_to:
+        unsupported_filters.append("applications_deadline_to")
+
+    # next_page_token — передаётся через pageNumber
+    if filter_.next_page_token:
+        applied_filters.append("next_page_token")
+
     return params
 
 

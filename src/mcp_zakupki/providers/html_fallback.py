@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 import re
 import xml.etree.ElementTree as ET
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
 
@@ -44,6 +44,12 @@ if TYPE_CHECKING:
     from ..schemas import TenderSearchFilter
 
 logger = logging.getLogger(__name__)
+
+
+_BASE = "https://zakupki.gov.ru"
+_VIEW_XML = "/epz/order/notice/printForm/viewXml.html"
+_VIEW_HTML = "/epz/order/notice/printForm/view.html"
+
 
 
 _BASE = "https://zakupki.gov.ru"
@@ -129,7 +135,8 @@ class HtmlFallbackProvider(BaseProvider):
 # local-name через утилиту `_q`. Полная нормализация под десятки
 # `subsystemType` (PRIZ/RGK/RKPO/...) — Phase 1.x.
 
-_NS_RE = re.compile(r"\{[^}]+\}")
+_NS_RE = re.compile(r"\{(.*?)\}")
+
 
 
 def _q(tag: str) -> str:
@@ -155,6 +162,37 @@ def _find_first(root: ET.Element, *names: str) -> ET.Element | None:
 
 def _find_all(root: ET.Element, name: str) -> list[ET.Element]:
     return [el for el in root.iter() if _q(el.tag) == name]
+
+
+def _find_in_container(
+    root: ET.Element, container_name: str, *names: str
+) -> ET.Element | None:
+    """Найти элемент с любым из `names` только внутри первого контейнера `container_name`.
+
+    Глобальный `_find_first` ищет по всему дереву и может вернуть
+    `endDate` из раздела исполнения контракта вместо `endDT` из collectingInfo.
+    """
+    target = set(names)
+    for container in root.iter():
+        if _q(container.tag) == container_name:
+            for child in container.iter():
+                if _q(child.tag) in target and child is not container:
+                    return child
+            break
+    return None
+
+
+def _has_ancestor(
+    el: ET.Element, parent_map: dict[int, ET.Element], name: str
+) -> bool:
+    """Проверить, есть ли у элемента предок с локальным именем `name`."""
+    cur = el
+    while True:
+        cur = parent_map.get(id(cur))
+        if cur is None:
+            return False
+        if _q(cur.tag) == name:
+            return True
 
 
 def _detect_law_type(root: ET.Element) -> LawType:
@@ -196,6 +234,16 @@ def _parse_dt(raw: str | None) -> datetime | None:
         return None
 
 
+def _collect_timezone(root: ET.Element) -> str | None:
+    """Извлечь часовой пояс из первой найденной даты со смещением."""
+    for el in root.iter():
+        val = (el.text or "").strip()
+        m = re.search(r"([+-]\d{2}:\d{2})$", val)
+        if m:
+            return m.group(1)
+    return None
+
+
 def _xml_to_tender(
     root: ET.Element,
     reg_number: str,
@@ -208,12 +256,29 @@ def _xml_to_tender(
 
     Делается best-effort: если поле отсутствует — None / пустой default.
     Полный маппинг по 44-ФЗ / 223-ФЗ / 615-ПП — задача Phase 1.x.
+
+    Исправления относительно v0.2.0:
+    * applications_deadline из collectingInfo/endDT (или biddingDate),
+      не через глобальный _find_first("endDate", ...).
+    * contract_execution_end_date — календарная дата (date, YYYY-MM-DD), отдельное поле.
+    * smp_only = None, если не найдено (не false).
+    * parse_warnings, verified_fields, *_raw, applications_timezone.
     """
     law_type = _detect_law_type(root)
+
+    parent_map: dict[int, ET.Element] = {}
+    for p_el in root.iter():
+        for c_el in p_el:
+            parent_map[id(c_el)] = p_el
+
+    parse_warnings: list[str] = []
+    verified_fields: list[str] = []
 
     title = (
         _ftext(_find_first(root, "purchaseObjectInfo", "purchaseObjectInfo")) or "—"
     )
+    verified_fields.extend(["reg_number", "law_type", "title"])
+
     title_full = _ftext(_find_first(root, "purchaseObjectInfoFull")) or None
 
     customer_inn = _ftext(_find_first(root, "INN", "inn"))
@@ -230,10 +295,95 @@ def _xml_to_tender(
     region_code = _ftext(_find_first(root, "code", "regionCode"))
     address = _ftext(_find_first(root, "factualAddress", "factAddress", "postAddress"))
 
-    publish_date = _parse_dt(_ftext(_find_first(root, "publishDate", "publicationDateTime")))
-    apps_deadline = _parse_dt(
-        _ftext(_find_first(root, "endDate", "applicationDeadline", "endDateTime"))
+    publish_date_raw = _ftext(
+        _find_first(root, "publishDate", "publicationDateTime", "docDate", "plannedPublishDate")
     )
+    publish_date = _parse_dt(publish_date_raw)
+    if publish_date_raw:
+        verified_fields.append("publish_date")
+    if publish_date_raw and not publish_date:
+        parse_warnings.append(f"publish_date не распознан: {publish_date_raw}")
+
+    apps_deadline_raw: str | None = None
+    apps_deadline: datetime | None = None
+    apps_timezone: str | None = None
+
+    collecting_end_dt = _find_in_container(root, "collectingInfo", "endDT")
+    if collecting_end_dt is not None:
+        apps_deadline_raw = _ftext(collecting_end_dt)
+    else:
+        bidding_date = _ftext(_find_first(root, "biddingDate"))
+        if bidding_date:
+            apps_deadline_raw = bidding_date
+            parse_warnings.append(
+                "applications_deadline взят из biddingDate (collectingInfo/endDT не найден)"
+            )
+
+    if apps_deadline_raw:
+        apps_deadline = _parse_dt(apps_deadline_raw)
+        verified_fields.append("applications_deadline")
+        # Extract timezone from the applications_deadline value itself (+07:00 / +03:00)
+        m = re.search(r"([+-])(\d{2}):?(\d{2})$", apps_deadline_raw)
+        if apps_deadline and m:
+            apps_timezone = m.group(0)
+        if not apps_deadline:
+            parse_warnings.append(f"applications_deadline не распознан: {apps_deadline_raw}")
+    else:
+        parse_warnings.append(
+            "applications_deadline не найден в XML (collectingInfo/endDT или biddingDate absent)"
+        )
+
+    # contract_execution_end_date — календарная дата (date, YYYY-MM-DD).
+    # endDate берём только из раздела исполнения контракта:
+    # contractConditionsInfo / contractExecutionPaymentPlan / ... /
+    # notRelativeTermsInfo / endDate.
+    # Правило "любой endDate вне collectingInfo" НЕ используется, потому что
+    # endDate встречается также в этапах, гарантиях, обеспечении и финансировании.
+    # Кандидатов нет — null + предупреждение. Несколько кандидатов с разными
+    # значениями — путь неоднозначен → null + предупреждение (не выбираем первое
+    # попавшееся). Значения совпадают — значение однозначно, извлекаем только дату
+    # (смещение часового пояса +03:00 — не время исполнения).
+    contract_exec_raw: str | None = None
+    contract_exec_end_date: date | None = None
+    contract_exec_end_date_raw: str | None = None
+
+    contract_exec_candidates: list[ET.Element] = []
+    for el in root.iter():
+        if _q(el.tag) != "endDate":
+            continue
+        parent = parent_map.get(id(el))
+        if parent is None or _q(parent.tag) != "notRelativeTermsInfo":
+            continue
+        if not _has_ancestor(el, parent_map, "contractExecutionPaymentPlan"):
+            continue
+        contract_exec_candidates.append(el)
+
+    if not contract_exec_candidates:
+        parse_warnings.append(
+            "contract_execution_end_date не найден: "
+            "contractConditionsInfo/contractExecutionPaymentPlan/"
+            ".../notRelativeTermsInfo/endDate отсутствует"
+        )
+    else:
+        raw_values = [(_ftext(el) or "").strip() for el in contract_exec_candidates]
+        if len(set(raw_values)) != 1:
+            parse_warnings.append(
+                "contract_execution_end_date: несколько endDate в разделе исполнения "
+                "контракта с разными значениями, не выбирать первое — вернуть null"
+            )
+        else:
+            contract_exec_raw = raw_values[0]
+            contract_exec_end_date_raw = contract_exec_raw
+            if contract_exec_raw:
+                m = re.match(r"^(\d{4}-\d{2}-\d{2})", contract_exec_raw)
+                if m:
+                    contract_exec_end_date = date.fromisoformat(m.group(1))
+                    verified_fields.append("contract_execution_end_date")
+                else:
+                    parse_warnings.append(
+                        f"contract_execution_end_date не распознан: {contract_exec_raw}"
+                    )
+
     auction_date = _parse_dt(_ftext(_find_first(root, "auctionDate", "auctionStartDateTime")))
 
     price_node = _find_first(
@@ -244,9 +394,17 @@ def _xml_to_tender(
         "purchaseInitialPrice",
     )
     price_initial = _parse_decimal(_ftext(price_node))
+    if price_initial is not None:
+        verified_fields.append("price_initial_rub")
 
     smp_only_node = _find_first(root, "subjectsRF", "smallBusinessRequirement", "isSmallBusiness")
-    smp_only = (_ftext(smp_only_node) or "").lower() in {"true", "1", "y"}
+    smp_text = _ftext(smp_only_node)
+    smp_only: bool | None = None
+    if smp_text is not None:
+        smp_only = smp_text.lower() in {"true", "1", "y"}
+        verified_fields.append("smp_only")
+    else:
+        parse_warnings.append("smp_only не найден в XML, установлен None")
 
     documents: list[Document] = []
     if include_documents:
@@ -273,6 +431,10 @@ def _xml_to_tender(
         price_initial_rub=price_initial,
         publish_date=publish_date,
         applications_deadline=apps_deadline,
+        applications_deadline_raw=apps_deadline_raw,
+        applications_timezone=apps_timezone,
+        contract_execution_end_date=contract_exec_end_date,
+        contract_execution_end_date_raw=contract_exec_end_date_raw,
         auction_date=auction_date,
         platform=Platform.OTHER,
         status=TenderStatus.UNKNOWN,
@@ -282,6 +444,8 @@ def _xml_to_tender(
         url_xml=url_xml,
         fetched_at=datetime.now(UTC),
         source_provider="html_fallback",
+        parse_warnings=parse_warnings,
+        verified_fields=verified_fields,
     )
 
 

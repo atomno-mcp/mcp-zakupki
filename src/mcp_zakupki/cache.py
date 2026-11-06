@@ -279,7 +279,7 @@ class CacheStore:
         apps_deadline: str | None = None,
         platform: str | None = None,
         status: str | None = None,
-        smp_only: bool = False,
+        smp_only: bool | None = None,
     ) -> None:
         assert self._db is not None
         now = utc_now()
@@ -310,7 +310,7 @@ class CacheStore:
                 apps_deadline,
                 platform,
                 status,
-                int(smp_only),
+                int(smp_only) if smp_only is not None else None,
                 json.dumps(tender_json, sort_keys=True, ensure_ascii=False, default=str),
                 provider,
                 _iso(now),

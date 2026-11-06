@@ -7,7 +7,7 @@ DaMIA / ГосПлан / navodki / HTML), и тулзами (для serialize в
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Annotated, Any, Literal
@@ -155,11 +155,15 @@ class Tender(BaseModel):
     currency: str = "RUB"
     publish_date: datetime | None = None
     applications_deadline: datetime | None = None
+    applications_timezone: str | None = None
+    applications_deadline_raw: str | None = None
+    contract_execution_end_date: date | None = None
+    contract_execution_end_date_raw: str | None = None
     auction_date: datetime | None = None
     platform: Platform | None = None
     procedure_type: ProcedureType | None = None
     status: TenderStatus = TenderStatus.UNKNOWN
-    smp_only: bool = False
+    smp_only: bool | None = None
     advance_payment_pct: float | None = None
     execution_period_days: int | None = None
     delivery_address: str | None = None
@@ -171,6 +175,8 @@ class Tender(BaseModel):
     url_xml: str | None = None
     fetched_at: datetime
     source_provider: str
+    parse_warnings: list[str] = Field(default_factory=list)
+    verified_fields: list[str] = Field(default_factory=list)
 
 
 class SearchMeta(BaseModel):
@@ -181,6 +187,11 @@ class SearchMeta(BaseModel):
     took_ms: int = 0
     source: str = "unknown"
     cache_hit: bool = False
+    applied_filters: list[str] = Field(default_factory=list)
+    unsupported_filters: list[str] = Field(default_factory=list)
+    post_filtered: bool = False
+    hydrated_tenders: int = 0
+    warnings: list[str] = Field(default_factory=list)
 
 
 class SearchResult(BaseModel):
@@ -299,7 +310,8 @@ class TenderSearchFilter(BaseModel):
     price_min_rub: PriceRub | None = None
     price_max_rub: PriceRub | None = None
     status: list[TenderStatus] = Field(default_factory=list)
-    smp_only: bool = False
+    smp_only: bool | None = None
+    strict_filters: bool = False
     publish_date_from: str | None = None
     publish_date_to: str | None = None
     applications_deadline_from: str | None = None

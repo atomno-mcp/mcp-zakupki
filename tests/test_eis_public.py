@@ -14,7 +14,7 @@ from mcp_zakupki.providers.eis_public import (
     parse_rnp_status,
     parse_search_html,
 )
-from mcp_zakupki.schemas import TenderSearchFilter
+from mcp_zakupki.schemas import TenderSearchFilter, TenderStatus
 
 SEARCH_HTML = """
 <div class="registry-entry__header">
@@ -71,6 +71,71 @@ TENDER_XML = """<?xml version="1.0" encoding="UTF-8"?>
   <shortName>МИНЗАКАЗ ВО</shortName>
   <maxPrice>58540.00</maxPrice>
 </ns7:epNotificationEZK2020>
+"""
+
+# HTML с шестью карточками разного точного статуса для проверки локальной фильтрации.
+# Статусы: applications_open, applications_closed, published, completed, cancelled, unknown.
+SEARCH_HTML_MIXED = """
+<div class="registry-entry__header">
+  <div class="registry-entry__header-top__title">44-ФЗ Запрос котировок</div>
+  <a href="/epz/order/notice/printForm/view.html?regNumber=0131200001026005946">печать</a>
+  <div class="registry-entry__header-mid__number">
+    <a href="/epz/order/notice/zk20/view/common-info.html?regNumber=0131200001026005946">№ 0131200001026005946</a>
+  </div>
+  <div class="registry-entry__header-mid__title">Подача заявок</div>
+  <div class="registry-entry__body-value">Товар 1</div>
+  <div class="price-block">Начальная цена 100 000,00 ₽</div>
+</div>
+<div class="registry-entry__header">
+  <div class="registry-entry__header-top__title">44-ФЗ Аукцион</div>
+  <a href="/epz/order/notice/printForm/view.html?regNumber=0131200001026005947">печать</a>
+  <div class="registry-entry__header-mid__number">
+    <a href="/epz/order/notice/zk20/view/common-info.html?regNumber=0131200001026005947">№ 0131200001026005947</a>
+  </div>
+  <div class="registry-entry__header-mid__title">Работа комиссии</div>
+  <div class="registry-entry__body-value">Товар 2</div>
+  <div class="price-block">Начальная цена 200 000,00 ₽</div>
+</div>
+<div class="registry-entry__header">
+  <div class="registry-entry__header-top__title">44-ФЗ Аукцион</div>
+  <a href="/epz/order/notice/printForm/view.html?regNumber=0131200001026005948">печать</a>
+  <div class="registry-entry__header-mid__number">
+    <a href="/epz/order/notice/zk20/view/common-info.html?regNumber=0131200001026005948">№ 0131200001026005948</a>
+  </div>
+  <div class="registry-entry__header-mid__title">Завершен</div>
+  <div class="registry-entry__body-value">Товар 3</div>
+  <div class="price-block">Начальная цена 300 000,00 ₽</div>
+</div>
+<div class="registry-entry__header">
+  <div class="registry-entry__header-top__title">44-ФЗ Аукцион</div>
+  <a href="/epz/order/notice/printForm/view.html?regNumber=0131200001026005949">печать</a>
+  <div class="registry-entry__header-mid__number">
+    <a href="/epz/order/notice/zk20/view/common-info.html?regNumber=0131200001026005949">№ 0131200001026005949</a>
+  </div>
+  <div class="registry-entry__header-mid__title">Отменён</div>
+  <div class="registry-entry__body-value">Товар 4</div>
+  <div class="price-block">Начальная цена 400 000,00 ₽</div>
+</div>
+<div class="registry-entry__header">
+  <div class="registry-entry__header-top__title">44-ФЗ Аукцион</div>
+  <a href="/epz/order/notice/printForm/view.html?regNumber=0131200001026005950">печать</a>
+  <div class="registry-entry__header-mid__number">
+    <a href="/epz/order/notice/zk20/view/common-info.html?regNumber=0131200001026005950">№ 0131200001026005950</a>
+  </div>
+  <div class="registry-entry__header-mid__title">В обработке</div>
+  <div class="registry-entry__body-value">Товар 5</div>
+  <div class="price-block">Начальная цена 500 000,00 ₽</div>
+</div>
+<div class="registry-entry__header">
+  <div class="registry-entry__header-top__title">44-ФЗ Аукцион</div>
+  <a href="/epz/order/notice/printForm/view.html?regNumber=0131200001026005951">печать</a>
+  <div class="registry-entry__header-mid__number">
+    <a href="/epz/order/notice/zk20/view/common-info.html?regNumber=0131200001026005951">№ 0131200001026005951</a>
+  </div>
+  <div class="registry-entry__header-mid__title">Размещен</div>
+  <div class="registry-entry__body-value">Товар 6</div>
+  <div class="price-block">Начальная цена 600 000,00 ₽</div>
+</div>
 """
 
 
@@ -144,6 +209,92 @@ class TestEisPublicProvider:
         assert summary.tenders_total is None
         assert summary.total_volume_rub is None
         assert summary.limitations
+
+    async def test_post_filtered_true_when_all_matching(self) -> None:
+        """post_filtered == true, если статус применён локально,
+        даже когда все закупки уже имеют точный статус applications_open.
+
+        SEARCH_HTML содержит одну карточку со статусом "Подача заявок"
+        (TenderStatus.APPLICATIONS_OPEN). При фильтре status=["applications_open"]
+        ни одна закупка не удаляется, но post_filtered всё равно true.
+        """
+        with respx.mock(assert_all_called=False) as router:
+            router.get("https://zakupki.gov.ru/epz/order/extendedsearch/results.html").mock(
+                return_value=Response(200, text=SEARCH_HTML, headers={"content-type": "text/html"})
+            )
+            async with EisPublicProvider(_cfg()) as p:
+                res = await p.search_tenders(
+                    TenderSearchFilter(status=["applications_open"])
+                )
+        assert res.search_meta.post_filtered is True
+        assert "status" in res.search_meta.applied_filters
+        assert "status" not in res.search_meta.unsupported_filters
+        assert len(res.tenders) == 1
+        assert res.tenders[0].status == TenderStatus.APPLICATIONS_OPEN
+
+    @pytest.mark.parametrize(
+        "filter_statuses, expected_reg_numbers",
+        [
+            # A. applications_open → только applications_open (published и unknown исключаются)
+            (["applications_open"], {"0131200001026005946"}),
+            # B. published → только published
+            (["published"], {"0131200001026005951"}),
+            # C. completed → только completed
+            (["completed"], {"0131200001026005948"}),
+            # D. cancelled → только cancelled
+            (["cancelled"], {"0131200001026005949"}),
+            # E. applications_closed → только applications_closed
+            (["applications_closed"], {"0131200001026005947"}),
+            # F. applications_open + applications_closed → оба точных статуса
+            (
+                ["applications_open", "applications_closed"],
+                {"0131200001026005946", "0131200001026005947"},
+            ),
+        ],
+    )
+    async def test_local_status_filter_exact(
+        self, filter_statuses: list[str], expected_reg_numbers: set[str]
+    ) -> None:
+        """Локальная фильтрация по точному статусу: unknown исключается."""
+        with respx.mock(assert_all_called=False) as router:
+            router.get("https://zakupki.gov.ru/epz/order/extendedsearch/results.html").mock(
+                return_value=Response(
+                    200, text=SEARCH_HTML_MIXED, headers={"content-type": "text/html"}
+                )
+            )
+            async with EisPublicProvider(_cfg()) as p:
+                res = await p.search_tenders(
+                    TenderSearchFilter(status=filter_statuses)
+                )
+        assert res.search_meta.post_filtered is True
+        assert "status" in res.search_meta.applied_filters
+        assert "status" not in res.search_meta.unsupported_filters
+        got = {t.reg_number for t in res.tenders}
+        assert got == expected_reg_numbers
+        # unknown (0131200001026005950) никогда не должен попадать в результат
+        assert "0131200001026005950" not in got
+
+    async def test_local_status_filter_no_status(self) -> None:
+        """Без фильтра status возвращаются все шесть статусов, включая unknown и published."""
+        with respx.mock(assert_all_called=False) as router:
+            router.get("https://zakupki.gov.ru/epz/order/extendedsearch/results.html").mock(
+                return_value=Response(
+                    200, text=SEARCH_HTML_MIXED, headers={"content-type": "text/html"}
+                )
+            )
+            async with EisPublicProvider(_cfg()) as p:
+                res = await p.search_tenders(TenderSearchFilter())
+        assert res.search_meta.post_filtered is False
+        assert "status" not in res.search_meta.applied_filters
+        assert "status" not in res.search_meta.unsupported_filters
+        assert {t.reg_number for t in res.tenders} == {
+            "0131200001026005946",
+            "0131200001026005947",
+            "0131200001026005948",
+            "0131200001026005949",
+            "0131200001026005950",
+            "0131200001026005951",
+        }
 
     async def test_supplier_stats_refuses(self) -> None:
         async with EisPublicProvider(_cfg()) as p:
