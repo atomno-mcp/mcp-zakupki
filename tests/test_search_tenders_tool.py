@@ -8,14 +8,49 @@ import pytest
 import respx
 from httpx import Response
 
+from mcp_zakupki.cache import make_args_hash
 from mcp_zakupki.config import AppConfig
 from mcp_zakupki.context import ServiceContext
 from mcp_zakupki.errors import ValidationError
+from mcp_zakupki.schemas import SearchResult, TenderSearchFilter
 from mcp_zakupki.tools import search_tenders
+
+SEARCH_HTML = """
+<div class="registry-entry__form">
+  <div class="registry-entry__header">
+    <div class="registry-entry__header-top__title">44-ФЗ</div>
+    <div class="registry-entry__header-mid__number">
+      <a href="/epz/order/notice/ea20/view/common-info.html?regNumber=0131200001026005946">
+        0131200001026005946
+      </a>
+    </div>
+  </div>
+  <div class="registry-entry__body-value">Поставка бумаги</div>
+</div>
+"""
 
 
 @pytest.mark.asyncio
 class TestSearchTenders:
+    async def test_old_shared_cache_cannot_supply_open_result(self, app_config):
+        filter_ = TenderSearchFilter(query="synthetic")
+        legacy_key = make_args_hash(filter_.model_dump(mode="json"))
+        async with ServiceContext(app_config) as ctx:
+            await ctx.cache.put_search(
+                legacy_key, filter_.model_dump(mode="json"),
+                SearchResult(query_echo={"synthetic": "old hosted result"}, tenders=[]).model_dump(mode="json"),
+                provider="eis_public", next_page_token=None, total_estimated=None,
+            )
+            with respx.mock as router:
+                route = router.get("https://zakupki.gov.ru/epz/order/extendedsearch/results.html").respond(
+                    200, text=SEARCH_HTML,
+                )
+                first = await search_tenders(ctx, query="synthetic")
+                second = await search_tenders(ctx, query="synthetic")
+                assert first.tenders and not first.search_meta.cache_hit
+                assert second.search_meta.cache_hit
+                assert route.call_count == 1
+
     async def test_invalid_inn_rejected(self, app_config) -> None:
         async with ServiceContext(app_config) as ctx:
             with pytest.raises(ValidationError):
@@ -34,15 +69,7 @@ class TestSearchTenders:
     async def test_official_source_without_keys(self, app_config) -> None:
         with respx.mock(assert_all_called=False) as router:
             router.get("https://zakupki.gov.ru/epz/order/extendedsearch/results.html").mock(
-                return_value=Response(
-                    200,
-                    text=(
-                        '<div class="registry-entry__header">'
-                        '<a href="?regNumber=0131200001026005946">x</a>'
-                        '<div class="registry-entry__body-value">Поставка бумаги</div>'
-                        "</div>"
-                    ),
-                )
+                return_value=Response(200, text=SEARCH_HTML),
             )
             async with ServiceContext(app_config) as ctx:
                 result = await search_tenders(ctx, query="бумага")

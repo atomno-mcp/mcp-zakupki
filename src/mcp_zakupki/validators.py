@@ -12,14 +12,14 @@ from datetime import UTC, date, datetime
 from typing import Final
 
 from .errors import ValidationError
+from .search_contract import validate_region_code as validate_region_code
 
 _RE_INN_LEGAL: Final[re.Pattern[str]] = re.compile(r"^\d{10}$")
 _RE_INN_INDIVIDUAL: Final[re.Pattern[str]] = re.compile(r"^\d{12}$")
 _RE_OGRN_LEGAL: Final[re.Pattern[str]] = re.compile(r"^\d{13}$")
 _RE_OGRN_INDIVIDUAL: Final[re.Pattern[str]] = re.compile(r"^\d{15}$")
-_RE_REG_NUMBER: Final[re.Pattern[str]] = re.compile(r"^\d{19,21}$")
+_RE_REG_NUMBER: Final[re.Pattern[str]] = re.compile(r"[0-9]{11}|[0-9]{19,21}")
 _RE_OKPD2: Final[re.Pattern[str]] = re.compile(r"^\d{2}(\.\d{1,3}){0,5}$")
-_RE_REGION_CODE: Final[re.Pattern[str]] = re.compile(r"^\d{1,2}$")
 
 
 def normalize_str(raw: str | None) -> str | None:
@@ -61,7 +61,7 @@ def validate_ogrn(ogrn: str | None) -> str | None:
 
 
 def validate_reg_number(reg_number: str | None) -> str:
-    """Реестровый номер тендера в ЕИС: 19–21 цифр.
+    """Реестровый номер ЕИС: 11 цифр для 223-ФЗ, также 19–21 цифра.
 
     Обязательное поле; пустой вход кидает ValidationError.
     """
@@ -71,10 +71,10 @@ def validate_reg_number(reg_number: str | None) -> str:
             "Реестровый номер тендера обязателен (поле reg_number).",
             details={"reg_number": None},
         )
-    if not _RE_REG_NUMBER.match(norm):
+    if not _RE_REG_NUMBER.fullmatch(norm):
         raise ValidationError(
-            f"Реестровый номер ЕИС должен быть 19–21 цифр. Получено: {norm!r}.",
-            details={"reg_number": norm, "expected_length": "19-21"},
+            f"Реестровый номер ЕИС должен содержать 11 или 19–21 цифру. Получено: {norm!r}.",
+            details={"reg_number": norm, "expected_lengths": [11, 19, 20, 21]},
         )
     return norm
 
@@ -100,22 +100,6 @@ def validate_okpd2_codes(codes: list[str] | None) -> list[str]:
     if not codes:
         return []
     return [validate_okpd2_code(c) for c in codes]
-
-
-def validate_region_code(region: str) -> str:
-    """Код субъекта РФ — 1–2 цифры (`5`, `74`, `77`, `99`)."""
-    norm = normalize_str(region)
-    if norm is None:
-        raise ValidationError(
-            "Код региона не может быть пустым.",
-            details={"region": region},
-        )
-    if not _RE_REGION_CODE.match(norm):
-        raise ValidationError(
-            f"Код региона должен быть 1–2 цифры. Получено: {norm!r}.",
-            details={"region": norm},
-        )
-    return norm.zfill(2)
 
 
 def validate_price_range(

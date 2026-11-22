@@ -8,4 +8,4 @@ get_tender, get_customer_history, get_supplier_stats, lookup_okpd2.
 (`eis_public`). Покупные посредники — только если явно заданы.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"

@@ -7,12 +7,12 @@ DaMIA / ГосПлан / navodki / HTML), и тулзами (для serialize в
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 # --- Enums ------------------------------------------------------------------
 
@@ -171,6 +171,8 @@ class Tender(BaseModel):
     url_xml: str | None = None
     fetched_at: datetime
     source_provider: str
+    publish_date_only: date | None = None
+    applications_deadline_date: date | None = None
 
 
 class SearchMeta(BaseModel):
@@ -305,4 +307,4 @@ class TenderSearchFilter(BaseModel):
     applications_deadline_from: str | None = None
     applications_deadline_to: str | None = None
     limit: int = Field(default=20, ge=1, le=100)
-    next_page_token: str | None = None
+    next_page_token: Annotated[str, StringConstraints(strip_whitespace=False)] | None = None

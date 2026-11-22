@@ -100,7 +100,7 @@ class DamiaProvider(BaseProvider):
             ) from exc
         return SearchResult(
             query_echo=filter_.model_dump(mode="json"),
-            total_estimated=_safe_int(payload.get("total")),
+            total_estimated=_safe_int(payload.get("total")) if isinstance(payload, dict) else None,
             page_size=len(tenders),
             tenders=tenders,
             search_meta=SearchMeta(took_ms=0, source="damia", cache_hit=False),

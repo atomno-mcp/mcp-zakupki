@@ -10,16 +10,15 @@ from __future__ import annotations
 
 import logging
 import re
-import xml.etree.ElementTree as ET
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING, Any
-from urllib.parse import urljoin
+from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
-from selectolax.parser import HTMLParser
+from selectolax.parser import HTMLParser, Node
 
 from ..config import AppConfig
-from ..errors import NotFoundError, ParseError, ProviderUnavailableError
+from ..errors import NotFoundError, ParseError, ProviderUnavailableError, ValidationError
 from ..schemas import (
     Customer,
     LawType,
@@ -28,21 +27,18 @@ from ..schemas import (
     SearchMeta,
     SearchResult,
     Tender,
+    TenderSearchFilter,
     TenderStatus,
 )
+from ..search_contract import MAX_PAGE, validate_public_search
 from .base import BaseProvider, ProviderCapability, ProviderInfo
+from .eis_notice_xml import is_notice_number, parse_notice_xml, print_links_223, public_eis_url
+from .eis_regions import REGION_NAMES, normalize_customer_regions
 from .html_fallback import (
     _BASE as _EIS_BASE,
 )
-from .html_fallback import (
-    _VIEW_HTML,
-    _VIEW_XML,
-    _xml_to_tender,
-)
+from .html_fallback import _VIEW_HTML, _VIEW_XML
 from .http_client import HttpAdapter
-
-if TYPE_CHECKING:
-    from ..schemas import TenderSearchFilter
 
 logger = logging.getLogger(__name__)
 
@@ -54,12 +50,15 @@ _NO_RECORDS_RE = re.compile(
     r"Поиск не дал результатов|noRecords",
     re.IGNORECASE,
 )
-_REG_RE = re.compile(r"regNumber=(\d{18,25})")
 _PRICE_RE = re.compile(
     r"([\d\s\u00a0]+(?:[.,]\d{1,2})?)\s*(?:₽|руб)",
     re.IGNORECASE,
 )
 _INN_RE = re.compile(r"\b(\d{10}|\d{12})\b")
+_HTML_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ru-RU,ru;q=0.9",
+}
 
 _ANALYTICS_UNAVAILABLE = (
     "Сводная статистика поставщика (объёмы, средние, помесячно) на "
@@ -99,20 +98,37 @@ class EisPublicProvider(BaseProvider):
 
     async def search_tenders(self, filter_: TenderSearchFilter) -> SearchResult:
         params = _search_params(filter_)
+        tree = await self._search_page(params)
+        page = int(params["pageNumber"])
+        tenders = _page_tenders(tree, page)
+        if any(tender.law_type not in filter_.law_type for tender in tenders) and filter_.law_type:
+            raise ParseError("ЕИС вернула извещения вне выбранного закона.")
+        tenders = _filter_customer_location(tree, params, tenders)
+        query = filter_.query
+        if query and is_notice_number(query):
+            tenders = [
+                await self._load_notice(tender, include_documents=False)
+                for tender in tenders
+                if tender.reg_number == query
+            ]
+            regions = normalize_customer_regions(filter_.regions)
+            if regions and any(
+                tender.customer.region_code and tender.customer.region_code not in regions
+                for tender in tenders
+            ):
+                raise ParseError("Регион заказчика в карточке расходится с фильтром реестра ЕИС.")
+            return _search_result(filter_, tenders, total=len(tenders))
+
+        return _search_result(filter_, tenders, total=_search_total(tree), next_token=_next_page(tree, page))
+
+    async def _search_page(self, params: dict[str, Any]) -> HTMLParser:
         text = await self._http.get_text(
             f"{_EIS_BASE}{_SEARCH_PATH}",
             provider_name=self.info.label,
             params=params,
+            headers=_HTML_HEADERS,
         )
-        tenders = parse_search_html(text)
-        return SearchResult(
-            query_echo=filter_.model_dump(mode="json"),
-            total_estimated=None,
-            page_size=len(tenders),
-            next_page_token=_next_page(filter_, tenders),
-            tenders=tenders,
-            search_meta=SearchMeta(took_ms=0, source="eis_public", cache_hit=False),
-        )
+        return HTMLParser(text)
 
     async def get_tender(
         self,
@@ -121,33 +137,55 @@ class EisPublicProvider(BaseProvider):
         include_documents: bool = True,
         include_protocols: bool = False,
     ) -> Tender:
-        url = f"{_EIS_BASE}{_VIEW_XML}"
-        text = await self._http.get_text(
-            url,
-            provider_name=self.info.label,
-            params={"regNumber": reg_number},
-            expected_404_to_not_found=True,
-        )
-        if not text or "<html" in text[:200].lower():
+        if include_protocols:
+            raise ValidationError("Публичный источник ЕИС не поддерживает загрузку протоколов.")
+        if not is_notice_number(reg_number):
+            raise ValidationError("Номер извещения должен содержать 11 или 19–21 цифру.")
+
+        is_223 = len(reg_number) == 11
+        tree = await self._search_page(_search_params(TenderSearchFilter(
+            query=reg_number, limit=10,
+            law_type=[LawType.FZ_223] if is_223 else [LawType.FZ_44, LawType.PP_615],
+        )))
+        summary = next((item for item in _page_tenders(tree, 1) if item.reg_number == reg_number), None)
+        if summary is None and is_223:
             raise NotFoundError(
-                f"Тендер {reg_number} не найден по публичному XML-виду ЕИС.",
-                details={"reg_number": reg_number, "url": f"{url}?regNumber={reg_number}"},
-            )
-        try:
-            root = ET.fromstring(text)
-        except ET.ParseError as exc:
-            raise ParseError(
-                f"ЕИС: невалидный XML печатной формы {reg_number}.",
+                f"Извещение {reg_number} не найдено в публичном реестре ЕИС.",
                 details={"reg_number": reg_number},
+            )
+        if summary is None:
+            # У старого извещения может остаться печатная форма без строки
+            # в реестре. Для таких карточек этап остаётся неизвестным.
+            archived = Tender(
+                reg_number=reg_number, law_type=LawType.FZ_44, title="",
+                customer=Customer(inn="", short_name="—"),
+                url_eis=f"{_EIS_BASE}{_VIEW_HTML}?regNumber={reg_number}",
+                url_xml=f"{_EIS_BASE}{_VIEW_XML}?regNumber={reg_number}",
+                fetched_at=datetime.now(UTC), source_provider=self.name,
+            )
+            return await self._load_notice(archived, include_documents=include_documents, listed=False)
+        return await self._load_notice(summary, include_documents=include_documents)
+
+    async def _load_notice(self, summary: Tender, *, include_documents: bool, listed: bool = True) -> Tender:
+        if not summary.url_xml:
+            raise ParseError("В карточке 223-ФЗ отсутствует ссылка ЕИС на XML извещения.")
+        parts = urlsplit(summary.url_xml)
+        try:
+            text = await self._http.get_text(
+                f"{_EIS_BASE}{parts.path}",
+                provider_name=self.info.label,
+                params={name: values[0] for name, values in parse_qs(parts.query).items()},
+                headers=_HTML_HEADERS,
+                expected_404_to_not_found=True,
+            )
+        except NotFoundError as exc:
+            if not listed:
+                raise
+            raise ProviderUnavailableError(
+                "ЕИС показала извещение в реестре, но не вернула его XML.",
+                details={"reg_number": summary.reg_number},
             ) from exc
-        tender = _xml_to_tender(
-            root,
-            reg_number,
-            url_xml=f"{url}?regNumber={reg_number}",
-            url_eis=f"{_EIS_BASE}{_VIEW_HTML}?regNumber={reg_number}",
-            include_documents=include_documents,
-        )
-        return tender.model_copy(update={"source_provider": "eis_public"})
+        return parse_notice_xml(text, summary, include_documents=include_documents)
 
     async def get_customer_history(
         self,
@@ -229,10 +267,8 @@ class EisPublicProvider(BaseProvider):
 
 
 def _search_params(filter_: TenderSearchFilter) -> dict[str, Any]:
-    page = 1
-    if filter_.next_page_token and str(filter_.next_page_token).isdigit():
-        page = max(1, int(filter_.next_page_token))
-    per_page = "_10" if filter_.limit <= 10 else "_20" if filter_.limit <= 20 else "_50"
+    page = validate_public_search(filter_)
+    per_page = f"_{filter_.limit}"
     query = filter_.query or filter_.customer_inn or ""
     params: dict[str, Any] = {
         "searchString": query,
@@ -251,21 +287,93 @@ def _search_params(filter_: TenderSearchFilter) -> dict[str, Any]:
         params["fz223"] = "on"
     if "615-pp" in laws:
         params["ppRf615"] = "on"
-    if filter_.customer_inn and filter_.query:
-        params["searchString"] = filter_.query
-        params["customerInn"] = filter_.customer_inn
+    codes = normalize_customer_regions(filter_.regions)
+    if codes:
+        kladr = ",".join(f"{code}000000000" for code in codes)
+        params.update(customerPlace=kladr, customerPlaceCodes=kladr)
     return params
 
 
-def _next_page(filter_: TenderSearchFilter, tenders: list[Tender]) -> str | None:
-    if not tenders:
+def _search_result(
+    filter_: TenderSearchFilter,
+    tenders: list[Tender],
+    *,
+    total: int | None = None,
+    next_token: str | None = None,
+) -> SearchResult:
+    return SearchResult(
+        query_echo=filter_.model_dump(mode="json"),
+        total_estimated=total,
+        page_size=len(tenders),
+        next_page_token=next_token,
+        tenders=tenders,
+        search_meta=SearchMeta(took_ms=0, source="eis_public", cache_hit=False),
+    )
+
+
+def _active_page(tree: HTMLParser) -> int | None:
+    current = _first_text(tree, ".paginator .page__link_active")
+    if current and current.isdecimal():
+        return int(current)
+    node = tree.css_first("#pageNumber")
+    raw = node.attributes.get("value", "") if node else ""
+    return int(raw) if raw.isdecimal() else None
+
+
+def _search_total(tree: HTMLParser) -> int | None:
+    raw = _first_text(tree, ".search-results__total")
+    if not raw:
         return None
-    page = 1
-    if filter_.next_page_token and str(filter_.next_page_token).isdigit():
-        page = int(filter_.next_page_token)
-    if len(tenders) < min(filter_.limit, 10):
+    match = re.fullmatch(r"(?:более\s+)?([0-9 ]+)\s+запис\w*", raw, re.IGNORECASE)
+    return int(match.group(1).replace(" ", "")) if match else None
+
+
+def _next_page(tree: HTMLParser, page: int) -> str | None:
+    node = tree.css_first(".paginator-button-next[data-pagenumber]")
+    token = node.attributes.get("data-pagenumber", "") if node else ""
+    if _active_page(tree) not in {None, page}:
         return None
-    return str(page + 1)
+    return token if page < MAX_PAGE and token == str(page + 1) else None
+
+
+def _page_tenders(tree: HTMLParser, page: int) -> list[Tender]:
+    active = _active_page(tree)
+    if active is not None and active < page:
+        # При запросе за концом выдачи ЕИС может заново отрисовать последнюю страницу.
+        return []
+    if active is not None and active > page:
+        raise ParseError("ЕИС вернула другую страницу поиска.")
+    tenders = _parse_search_cards(tree)
+    if tenders or tree.css_first(".noRecords") or _search_total(tree) == 0:
+        return tenders
+    raise ParseError("ЕИС не вернула распознаваемую страницу результатов поиска.")
+
+
+def _filter_customer_location(
+    tree: HTMLParser,
+    params: dict[str, Any],
+    tenders: list[Tender],
+) -> list[Tender]:
+    requested = params.get("customerPlace")
+    if not requested:
+        return tenders
+    kladr = set(requested.split(","))
+    for field in ("customerPlace", "customerPlaceCodes"):
+        node = tree.css_first(f'input[name="{field}"]')
+        returned = node.attributes.get("value", "") if node else ""
+        if set(returned.split(",")) != kladr:
+            raise ParseError("ЕИС не подтвердила выбранное местоположение заказчика.")
+    if len(kladr) == 1:
+        code = requested[:2]
+        return [
+            tender.model_copy(update={
+                "customer": tender.customer.model_copy(update={
+                    "region_code": code, "region_name": REGION_NAMES[code],
+                }),
+            })
+            for tender in tenders
+        ]
+    return tenders
 
 
 def _as_str(v: Any) -> str:
@@ -275,40 +383,97 @@ def _as_str(v: Any) -> str:
 
 
 def parse_search_html(html: str) -> list[Tender]:
-    """Разобрать страницу расширенного поиска ЕИС в список карточек."""
-    blocks = re.split(r'class="registry-entry__header"', html)
-    seen: set[str] = set()
-    tenders: list[Tender] = []
-    for block in blocks[1:]:
+    """Разобрать карточки расширенного поиска ЕИС."""
+    return _parse_search_cards(HTMLParser(html))
+
+
+def _parse_search_cards(tree: HTMLParser) -> list[Tender]:
+    blocks = tree.css(".registry-entry__form") or tree.css(".registry-entry__header")
+    tenders: dict[str, Tender] = {}
+    for block in blocks:
         tender = _parse_search_block(block)
-        if tender is None or tender.reg_number in seen:
+        if tender is None:
+            raise ParseError("ЕИС вернула неполную разметку извещения в результатах.")
+        tenders.setdefault(tender.reg_number, tender)
+    return list(tenders.values())
+
+
+def _customer_from_card(block: Node) -> Customer:
+    for row in block.css(".registry-entry__body-block"):
+        if _first_text(row, ".registry-entry__body-title") not in {"Заказчик", "Заказчики"}:
             continue
-        seen.add(tender.reg_number)
-        tenders.append(tender)
-    return tenders
+        link = row.css_first(".registry-entry__body-href a")
+        name = _first_text(row, ".registry-entry__body-href") or _first_text(row, ".registry-entry__body-value")
+        href = link.attributes.get("href", "") if link else ""
+        params = parse_qs(urlsplit(href).query)
+        return Customer(
+            inn=params.get("inn", [""])[0],
+            ogrn=params.get("ogrn", [None])[0],
+            short_name=name or "—",
+        )
+    return Customer(inn="", short_name="—")
 
 
-def _parse_search_block(block: str) -> Tender | None:
-    regs = _REG_RE.findall(block)
-    if not regs:
+def _card_date(block: Node, label: str) -> tuple[datetime | None, date | None]:
+    for node in block.css(".data-block__title"):
+        if _collapse(node.text()).rstrip(":") != label:
+            continue
+        value = node.next
+        while value is not None and value.tag == "-text":
+            value = value.next
+        if value is None or "data-block__value" not in value.attributes.get("class", "").split():
+            break
+        raw = _collapse(value.text())
+        for pattern, date_only in (("%d.%m.%Y", True), ("%d.%m.%Y %H:%M", False)):
+            try:
+                parsed = datetime.strptime(raw, pattern)
+            except ValueError:
+                continue
+            return (None, parsed.date()) if date_only else (parsed, None)
+        break
+    return None, None
+
+
+def _parse_search_block(block: Node) -> Tender | None:
+    link = block.css_first(".registry-entry__header-mid__number a")
+    if not link:
         return None
-    reg_number = regs[0]
-    tree = HTMLParser(f"<div {block}")
-    title = _first_text(tree, ".registry-entry__body-value") or "—"
-    customer_name = _first_text(tree, ".registry-entry__body-href a") or "—"
-    header = _first_text(tree, ".registry-entry__header-top__title") or ""
-    status_raw = _first_text(tree, ".registry-entry__header-mid__title") or ""
-    price_raw = _first_text(tree, ".price-block") or ""
+    canonical = public_eis_url(link.attributes.get("href"))
+    if not canonical:
+        return None
+    number = parse_qs(urlsplit(canonical).query).get("regNumber", [""])[0]
+    if not is_notice_number(number):
+        return None
+    header = _first_text(block, ".registry-entry__header-top__title") or ""
+    law = _law_from_header(header)
+    title = _first_text(block, ".registry-entry__body-value")
+    if not title or not law or (law == LawType.FZ_223) != (len(number) == 11):
+        return None
+
+    url_xml = f"{_EIS_BASE}{_VIEW_XML}?regNumber={number}"
+    if law == LawType.FZ_223:
+        links = [
+            print_links_223(anchor.attributes.get("href"), number)
+            for anchor in block.css(".registry-entry__header-top__icon a[href], a[href*='/notice223/printForm/']")
+        ]
+        verified = next((link_pair for link_pair in links if link_pair), None)
+        canonical, url_xml = verified if verified else (canonical, None)
+    published, published_day = _card_date(block, "Размещено")
+    deadline, deadline_day = _card_date(block, "Окончание подачи заявок")
     return Tender(
-        reg_number=reg_number,
-        law_type=_law_from_header(header),
-        title=_collapse(title),
-        customer=Customer(inn="", short_name=_collapse(customer_name)),
-        price_initial_rub=_parse_price(price_raw),
+        reg_number=number,
+        law_type=law,
+        title=title,
+        customer=_customer_from_card(block),
+        price_initial_rub=_parse_price(_first_text(block, ".price-block__value") or _first_text(block, ".price-block") or ""),
         platform=Platform.OTHER,
-        status=_status_from_ru(status_raw),
-        url_eis=urljoin(_EIS_BASE, f"{_VIEW_HTML}?regNumber={reg_number}"),
-        url_xml=urljoin(_EIS_BASE, f"{_VIEW_XML}?regNumber={reg_number}"),
+        status=_status_from_ru(_first_text(block, ".registry-entry__header-mid__title") or ""),
+        publish_date=published,
+        publish_date_only=published_day,
+        applications_deadline=deadline,
+        applications_deadline_date=deadline_day,
+        url_eis=canonical,
+        url_xml=url_xml,
         fetched_at=datetime.now(UTC),
         source_provider="eis_public",
     )
@@ -367,7 +532,7 @@ def _labeled_values(tree: HTMLParser) -> dict[str, str]:
     return out
 
 
-def _first_text(tree: HTMLParser, selector: str) -> str | None:
+def _first_text(tree: HTMLParser | Node, selector: str) -> str | None:
     node = tree.css_first(selector)
     if node is None:
         return None
@@ -379,24 +544,28 @@ def _collapse(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _law_from_header(header: str) -> LawType:
+def _law_from_header(header: str) -> LawType | None:
     if "223" in header:
         return LawType.FZ_223
     if "615" in header:
         return LawType.PP_615
-    return LawType.FZ_44
+    if "44" in header:
+        return LawType.FZ_44
+    return None
 
 
 def _status_from_ru(raw: str) -> TenderStatus:
-    s = raw.lower()
-    if "подача заявок" in s:
-        return TenderStatus.APPLICATIONS_OPEN
-    if "работа комисс" in s or "рассмотрение" in s:
-        return TenderStatus.APPLICATIONS_CLOSED
-    if "завершен" in s or "исполнен" in s:
-        return TenderStatus.COMPLETED
+    s = raw.casefold().replace("ё", "е")
     if "отмен" in s:
         return TenderStatus.CANCELLED
+    if "определение поставщика завершено" in s or "закупка завершена" in s or s == "завершена":
+        return TenderStatus.COMPLETED
+    if "работа комисс" in s or "рассмотрение заявок" in s or "подведение итогов" in s:
+        return TenderStatus.IN_PROGRESS
+    if "подача заявок завершен" in s or "прием заявок завершен" in s:
+        return TenderStatus.APPLICATIONS_CLOSED
+    if "подача заявок" in s or "прием заявок" in s:
+        return TenderStatus.APPLICATIONS_OPEN
     if "размещен" in s:
         return TenderStatus.PUBLISHED
     return TenderStatus.UNKNOWN

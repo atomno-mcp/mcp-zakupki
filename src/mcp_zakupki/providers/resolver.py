@@ -91,11 +91,14 @@ class ProviderResolver:
 
     # ---- public API ----------------------------------------------------
 
-    async def search_tenders(self, filter_: TenderSearchFilter) -> SearchResult:
+    async def search_tenders(
+        self, filter_: TenderSearchFilter, *, provider_name: str | None = None,
+    ) -> SearchResult:
         return await self._run(
             ProviderCapability.SEARCH,
             "search_tenders",
             lambda p: p.search_tenders(filter_),
+            provider_name=provider_name,
         )
 
     async def get_tender(
@@ -104,6 +107,7 @@ class ProviderResolver:
         *,
         include_documents: bool = True,
         include_protocols: bool = False,
+        provider_name: str | None = None,
     ) -> Tender:
         return await self._run(
             ProviderCapability.TENDER_DETAILS,
@@ -113,6 +117,7 @@ class ProviderResolver:
                 include_documents=include_documents,
                 include_protocols=include_protocols,
             ),
+            provider_name=provider_name,
         )
 
     async def get_customer_history(
@@ -154,10 +159,14 @@ class ProviderResolver:
         capability: ProviderCapability,
         op_name: str,
         action: Callable[[BaseProvider], Awaitable[T]],
+        *,
+        provider_name: str | None = None,
     ) -> T:
         attempted: list[dict[str, str]] = []
         last_exc: Exception | None = None
         for provider in self._chain:
+            if provider_name is not None and provider.name != provider_name:
+                continue
             if not (provider.info.capabilities & capability):
                 continue
             if provider.info.requires_auth and not provider.is_configured:

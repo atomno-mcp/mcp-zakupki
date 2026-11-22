@@ -7,7 +7,7 @@ import respx
 from httpx import Response
 
 from mcp_zakupki.config import AppConfig
-from mcp_zakupki.errors import ProviderUnavailableError
+from mcp_zakupki.errors import ProviderUnavailableError, ValidationError
 from mcp_zakupki.providers.eis_public import (
     EisPublicProvider,
     parse_org_html,
@@ -25,8 +25,11 @@ SEARCH_HTML = """
   </div>
   <div class="registry-entry__header-mid__title">Подача заявок</div>
   <div class="registry-entry__body-value">Поставка расходных материалов</div>
-  <div class="registry-entry__body-href">
-    <a href="/epz/organization/view/info.html">МИНЗАКАЗ ВО</a>
+  <div class="registry-entry__body-block">
+    <div class="registry-entry__body-title">Заказчик</div>
+    <div class="registry-entry__body-href">
+      <a href="/epz/organization/view/info.html">МИНЗАКАЗ ВО</a>
+    </div>
   </div>
   <div class="price-block">Начальная цена 58 540,00 ₽</div>
 </div>
@@ -107,6 +110,26 @@ class TestParsers:
 
 @pytest.mark.asyncio
 class TestEisPublicProvider:
+    @pytest.mark.parametrize("size", [10, 20, 50])
+    async def test_page_size_and_partial_page_are_not_silently_changed(self, size):
+        with respx.mock as router:
+            route = router.get("https://zakupki.gov.ru/epz/order/extendedsearch/results.html").respond(200, text=SEARCH_HTML)
+            async with EisPublicProvider(_cfg()) as provider:
+                result = await provider.search_tenders(TenderSearchFilter(limit=size, next_page_token="2"))
+            assert route.calls[0].request.url.params["recordsPerPage"] == f"_{size}"
+            assert route.calls[0].request.url.params["pageNumber"] == "2"
+            assert result.page_size == 1
+            assert result.next_page_token is None
+
+    @pytest.mark.parametrize("kwargs", [{"regions": ["00"]}, {"price_min_rub": 0}, {"okpd2_codes": ["62.01"]}, {"limit": 7}])
+    async def test_unsupported_does_not_call_upstream(self, kwargs):
+        with respx.mock(assert_all_called=False) as router:
+            route = router.get("https://zakupki.gov.ru/epz/order/extendedsearch/results.html").respond(200, text=SEARCH_HTML)
+            async with EisPublicProvider(_cfg()) as provider:
+                with pytest.raises(ValidationError):
+                    await provider.search_tenders(TenderSearchFilter(**kwargs))
+            assert route.call_count == 0
+
     async def test_search(self) -> None:
         with respx.mock(assert_all_called=False) as router:
             router.get("https://zakupki.gov.ru/epz/order/extendedsearch/results.html").mock(
@@ -119,6 +142,7 @@ class TestEisPublicProvider:
 
     async def test_get_tender_xml(self) -> None:
         with respx.mock(assert_all_called=False) as router:
+            router.get("https://zakupki.gov.ru/epz/order/extendedsearch/results.html").respond(200, text=SEARCH_HTML)
             router.get("https://zakupki.gov.ru/epz/order/notice/printForm/viewXml.html").mock(
                 return_value=Response(200, text=TENDER_XML, headers={"content-type": "text/xml"})
             )

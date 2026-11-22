@@ -7,7 +7,7 @@ import time
 from ..byok_limit import record_byok_usage
 from ..cache import make_args_hash
 from ..context import ServiceContext
-from ..errors import McpZakupkiError
+from ..errors import ConfigurationError, McpZakupkiError
 from ..schemas import Tender, TenderStatus
 from ..tier import enforce_byok_if_needed
 from ..validators import validate_reg_number
@@ -32,7 +32,10 @@ async def get_tender(
         }
     )
 
-    cached = await ctx.cache.get_tender(norm_reg)
+    hosted_mode = ctx.config.hosted_mode_enabled
+    # У старых записей не сохранены режим доступа и признаки документов/протоколов.
+    cache_key = f"direct-tender-v2:{args_hash}"
+    cached = None if hosted_mode else await ctx.cache.get_tender(cache_key)
     if cached is not None:
         tender = Tender.model_validate(cached["tender"])
         await ctx.cache.write_audit(
@@ -46,7 +49,9 @@ async def get_tender(
         return tender
 
     try:
-        if ctx.config.hosted_mode_enabled and ctx.hosted is not None:
+        if hosted_mode:
+            if ctx.hosted is None:
+                raise ConfigurationError("Задан ключ ATOMNO, но клиент API не настроен.")
             tender = await ctx.hosted.get_tender(
                 norm_reg,
                 include_documents=include_documents,
@@ -75,25 +80,26 @@ async def get_tender(
         raise
 
     elapsed = int((time.perf_counter() - started) * 1000)
-    is_completed = tender.status in {TenderStatus.COMPLETED, TenderStatus.CANCELLED}
-    await ctx.cache.put_tender(
-        norm_reg,
-        tender.model_dump(mode="json"),
-        provider=tender.source_provider,
-        is_completed=is_completed,
-        law_type=str(tender.law_type),
-        title=tender.title,
-        customer_inn=tender.customer.inn,
-        customer_name=tender.customer.short_name,
-        price_rub=float(tender.price_initial_rub) if tender.price_initial_rub is not None else None,
-        publish_date=tender.publish_date.isoformat() if tender.publish_date else None,
-        apps_deadline=tender.applications_deadline.isoformat()
-        if tender.applications_deadline
-        else None,
-        platform=str(tender.platform) if tender.platform else None,
-        status=str(tender.status),
-        smp_only=tender.smp_only,
-    )
+    if not hosted_mode:
+        is_completed = tender.status in {TenderStatus.COMPLETED, TenderStatus.CANCELLED}
+        await ctx.cache.put_tender(
+            cache_key,
+            tender.model_dump(mode="json"),
+            provider=tender.source_provider,
+            is_completed=is_completed,
+            law_type=str(tender.law_type),
+            title=tender.title,
+            customer_inn=tender.customer.inn,
+            customer_name=tender.customer.short_name,
+            price_rub=float(tender.price_initial_rub) if tender.price_initial_rub is not None else None,
+            publish_date=tender.publish_date.isoformat() if tender.publish_date else None,
+            apps_deadline=tender.applications_deadline.isoformat()
+            if tender.applications_deadline
+            else None,
+            platform=str(tender.platform) if tender.platform else None,
+            status=str(tender.status),
+            smp_only=tender.smp_only,
+        )
     await ctx.cache.write_audit(
         _TOOL_NAME,
         args_hash,

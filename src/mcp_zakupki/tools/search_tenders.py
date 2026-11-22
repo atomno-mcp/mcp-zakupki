@@ -16,7 +16,7 @@ import time
 from ..byok_limit import record_byok_usage
 from ..cache import make_args_hash
 from ..context import ServiceContext
-from ..errors import McpZakupkiError
+from ..errors import ConfigurationError, McpZakupkiError, ValidationError
 from ..schemas import (
     LawType,
     Platform,
@@ -25,6 +25,7 @@ from ..schemas import (
     TenderSearchFilter,
     TenderStatus,
 )
+from ..search_contract import validate_public_search
 from ..tier import enforce_byok_if_needed
 from ..validators import (
     validate_date_range,
@@ -101,10 +102,21 @@ async def search_tenders(
         next_page_token=next_page_token,
     )
 
-    args_hash = make_args_hash(filter_.model_dump(mode="json"))
+    hosted_mode = ctx.config.hosted_mode_enabled
+    # Прежний общий ключ мог содержать hosted-результат другой учётки.
+    # Новое пространство не читает такие записи и не требует удаления базы.
+    args_hash = make_args_hash(
+        {
+            "filter": filter_.model_dump(mode="json"),
+            "access_mode": "hosted-search-v3" if hosted_mode else "direct-search-v3",
+        }
+    )
 
-    cached = await ctx.cache.get_search(args_hash)
+    # Кэш открытого режима не подтверждает права платного ключа или его отзыв.
+    cached = None if hosted_mode else await ctx.cache.get_search(args_hash)
     if cached is not None:
+        if cached["provider"] == "eis_public":
+            validate_public_search(filter_)
         result = SearchResult.model_validate(cached["results"])
         result.search_meta = SearchMeta(
             took_ms=int((time.perf_counter() - started) * 1000),
@@ -122,7 +134,9 @@ async def search_tenders(
         return result
 
     try:
-        if ctx.config.hosted_mode_enabled and ctx.hosted is not None:
+        if hosted_mode:
+            if ctx.hosted is None:
+                raise ConfigurationError("Задан ключ ATOMNO, но клиент API не настроен.")
             result = await ctx.hosted.search_tenders(filter_)
         else:
             if _uses_paid_byok(ctx):
@@ -149,14 +163,15 @@ async def search_tenders(
         cache_hit=False,
     )
 
-    await ctx.cache.put_search(
-        args_hash,
-        filter_.model_dump(mode="json"),
-        result.model_dump(mode="json"),
-        provider=result.search_meta.source,
-        next_page_token=result.next_page_token,
-        total_estimated=result.total_estimated,
-    )
+    if not hosted_mode:
+        await ctx.cache.put_search(
+            args_hash,
+            filter_.model_dump(mode="json"),
+            result.model_dump(mode="json"),
+            provider=result.search_meta.source,
+            next_page_token=result.next_page_token,
+            total_estimated=result.total_estimated,
+        )
     await ctx.cache.write_audit(
         _TOOL_NAME,
         args_hash,
@@ -171,25 +186,23 @@ async def search_tenders(
 def _coerce_law(values: list[str] | None) -> list[LawType]:
     if not values:
         return [LawType.FZ_44, LawType.FZ_223]
-    out: list[LawType] = []
-    for v in values:
-        try:
-            out.append(LawType(v))
-        except ValueError:
-            continue
-    return out or [LawType.FZ_44, LawType.FZ_223]
+    try:
+        return [LawType(value) for value in values]
+    except ValueError as exc:
+        raise ValidationError(
+            "Допустимые значения law_type: 44-fz, 223-fz, 615-pp.",
+            details={"field": "law_type", "values": values},
+        ) from exc
 
 
 def _coerce_platforms(values: list[str] | None) -> list[Platform]:
-    if not values:
-        return []
-    out: list[Platform] = []
-    for v in values:
-        try:
-            out.append(Platform(v))
-        except ValueError:
-            continue
-    return out
+    try:
+        return [Platform(value) for value in values or []]
+    except ValueError as exc:
+        raise ValidationError(
+            "Неизвестная площадка в фильтре platform.",
+            details={"field": "platform", "values": values},
+        ) from exc
 
 
 def _coerce_statuses(values: list[str] | None) -> list[TenderStatus]:
@@ -208,8 +221,11 @@ def _coerce_statuses(values: list[str] | None) -> list[TenderStatus]:
             continue
         try:
             out.append(TenderStatus(v))
-        except ValueError:
-            continue
+        except ValueError as exc:
+            raise ValidationError(
+                "Неизвестный статус в фильтре status.",
+                details={"field": "status", "values": values},
+            ) from exc
     return out
 
 

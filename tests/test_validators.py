@@ -57,7 +57,7 @@ class TestValidateOgrn:
 class TestValidateRegNumber:
     @pytest.mark.parametrize(
         "n",
-        ["0173100007426000018", "01731000074260000180", "017310000742600001801"],
+        ["32616599714", "0173100007426000018", "01731000074260000180", "017310000742600001801"],
     )
     def test_valid_lengths_pass(self, n: str) -> None:
         assert validate_reg_number(n) == n
@@ -69,7 +69,7 @@ class TestValidateRegNumber:
         with pytest.raises(ValidationError):
             validate_reg_number("")
 
-    @pytest.mark.parametrize("bad", ["123", "abc", "01731000074", "0173100007426000018X"])
+    @pytest.mark.parametrize("bad", ["123", "abc", "326165997140", "３２６１６５９９７１４", "0173100007426000018X"])
     def test_invalid_raises(self, bad: str) -> None:
         with pytest.raises(ValidationError):
             validate_reg_number(bad)
@@ -103,7 +103,7 @@ class TestValidateRegionCode:
     def test_two_digit_passes(self) -> None:
         assert validate_region_code("74") == "74"
 
-    @pytest.mark.parametrize("bad", ["", "abc", "777"])
+    @pytest.mark.parametrize("bad", ["", "abc", "777", "00", "０５"])
     def test_invalid(self, bad: str) -> None:
         with pytest.raises(ValidationError):
             validate_region_code(bad)

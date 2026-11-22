@@ -1,25 +1,21 @@
-"""Тонкий HTTP-клиент к hosted API zakupki (api.atomno-mcp.ru).
-
-Паттерн как у mcp-sudact-client: без парсеров, только REST + X-API-Key.
-Пока backend не задеплоен — возвращает понятную ошибку «coming soon».
-"""
+"""HTTP-клиент API Закупок (api.atomno-mcp.ru)."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypeVar
 
 import httpx
+from pydantic import BaseModel
+from pydantic import ValidationError as PydanticValidationError
 
 from . import __version__
 from .config import AppConfig
-from .errors import HostedApiUnavailableError
+from .errors import HostedApiUnavailableError, NotFoundError, ParseError, ValidationError
 from .schemas import SearchResult, Tender, TenderSearchFilter
+from .search_contract import hosted_search_payload
 
-_COMING_SOON = (
-    "Hosted API для госзакупок ещё в разработке. "
-    "Напишите hello@atomno.ru для раннего доступа или используйте BYOK "
-    "(MCP_ZAKUPKI_DAMIA_KEY и др.) с дневным лимитом open-клиента."
-)
+_UNAVAILABLE = "API Закупок не вернул результат."
+_Model = TypeVar("_Model", bound=BaseModel)
 
 
 class ZakupkiHostedClient:
@@ -46,9 +42,9 @@ class ZakupkiHostedClient:
     async def search_tenders(self, filter_: TenderSearchFilter) -> SearchResult:
         return await self._post_model(
             "/search",
-            filter_.model_dump(mode="json", exclude_none=True),
+            hosted_search_payload(filter_),
             SearchResult,
-            "search_tenders",
+            required_field="tenders",
         )
 
     async def get_tender(
@@ -58,12 +54,23 @@ class ZakupkiHostedClient:
         include_documents: bool = True,
         include_protocols: bool = False,
     ) -> Tender:
+        if include_protocols:
+            raise ValidationError(
+                "API Закупок пока не загружает протоколы.",
+                details={"field": "include_protocols"},
+            )
         payload = {
             "reg_number": reg_number,
             "include_documents": include_documents,
             "include_protocols": include_protocols,
         }
-        return await self._post_model("/tender", payload, Tender, "get_tender")
+        tender = await self._post_model("/tender", payload, Tender)
+        if tender.reg_number != reg_number:
+            raise ParseError(
+                "API Закупок вернул карточку с другим реестровым номером.",
+                details={"operation": "/tender", "reg_number": reg_number},
+            )
+        return tender
 
     async def get_customer_history(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await self._post_json("/customer-history", payload)
@@ -75,69 +82,82 @@ class ZakupkiHostedClient:
         self,
         path: str,
         payload: dict[str, Any],
-        model_cls: type,
-        op: str,
-    ):
+        model_cls: type[_Model],
+        *,
+        required_field: str | None = None,
+    ) -> _Model:
         data = await self._post_json(path, payload)
-        return model_cls.model_validate(data)
+        try:
+            if required_field and required_field not in data:
+                raise ParseError(
+                    "В ответе API Закупок отсутствует обязательное поле.",
+                    details={"operation": path, "field": required_field},
+                )
+            return model_cls.model_validate(data)
+        except PydanticValidationError as exc:
+            raise ParseError(
+                "API Закупок вернул ответ в неожиданном формате.",
+                details={"operation": path},
+            ) from exc
 
     async def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         try:
             resp = await self._client.post(path, json=payload)
         except httpx.TimeoutException as exc:
             raise HostedApiUnavailableError(
-                _COMING_SOON,
+                "API Закупок не ответил за отведённое время.",
                 details={"operation": path, "reason": "timeout"},
             ) from exc
         except httpx.HTTPError as exc:
             raise HostedApiUnavailableError(
-                _COMING_SOON,
+                _UNAVAILABLE,
                 details={"operation": path, "reason": type(exc).__name__},
             ) from exc
 
-        if resp.status_code in (404, 501, 502, 503):
-            detail = _extract_detail(resp)
-            raise HostedApiUnavailableError(
-                detail or _COMING_SOON,
-                details={"operation": path, "http_status": resp.status_code},
-            )
-        if resp.status_code >= 400:
-            detail = _extract_detail(resp)
-            raise HostedApiUnavailableError(
-                detail or _COMING_SOON,
-                details={"operation": path, "http_status": resp.status_code},
-            )
+        if resp.is_error:
+            detail, code = _extract_error(resp)
+            details = {"operation": path, "http_status": resp.status_code}
+            if resp.status_code == 422 or code == ValidationError.code:
+                raise ValidationError(detail or "API Закупок отклонил параметры запроса.", details=details)
+            if resp.status_code == 404 and code == NotFoundError.code:
+                raise NotFoundError(detail or "Закупка с таким номером отсутствует в ответе ЕИС.", details=details)
+            raise HostedApiUnavailableError(detail or _UNAVAILABLE, details=details)
         try:
             body = resp.json()
         except ValueError as exc:
-            raise HostedApiUnavailableError(
-                _COMING_SOON,
+            raise ParseError(
+                "API Закупок вернул ответ в неожиданном формате.",
                 details={"operation": path, "reason": "invalid_json"},
             ) from exc
-        if isinstance(body, dict) and body.get("error") == "not_implemented":
+        if not isinstance(body, dict):
+            raise ParseError(
+                "API Закупок вернул ответ в неожиданном формате.",
+                details={"operation": path},
+            )
+        if body.get("error") == "not_implemented":
             raise HostedApiUnavailableError(
-                body.get("message_ru") or _COMING_SOON,
+                body.get("message_ru") or _UNAVAILABLE,
                 details=body.get("details") or {},
             )
-        if isinstance(body, dict) and body.get("status") in {
+        if body.get("status") in {
             "closed_beta",
             "coming_soon",
             "not_available",
         }:
             raise HostedApiUnavailableError(
-                body.get("message_ru") or _COMING_SOON,
+                body.get("message_ru") or _UNAVAILABLE,
                 details=body,
             )
         return body
 
 
-def _extract_detail(resp: httpx.Response) -> str | None:
+def _extract_error(resp: httpx.Response) -> tuple[str | None, str | None]:
     try:
         body = resp.json()
     except ValueError:
-        return resp.text[:300] or None
+        return None, None
     if isinstance(body, dict):
         for key in ("message_ru", "detail", "message", "error"):
-            if body.get(key):
-                return str(body[key])
-    return None
+            if isinstance(body.get(key), str) and body[key]:
+                return body[key], body.get("error")
+    return None, None
