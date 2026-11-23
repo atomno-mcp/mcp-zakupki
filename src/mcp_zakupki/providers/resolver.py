@@ -209,6 +209,17 @@ class ProviderResolver:
                     **last_exc.details,
                 },
             ) from last_exc
+        eis_search = last_exc.details.get("eis_search") if isinstance(last_exc, ParseError) else None
+        if eis_search:
+            raise ProviderUnavailableError(
+                last_exc.message_ru,
+                details={
+                    "operation": op_name,
+                    "attempted": attempted,
+                    "last_error": type(last_exc).__name__,
+                    "eis_search": eis_search,
+                },
+            ) from last_exc
         raise ProviderUnavailableError(
             f"Все провайдеры в цепочке исчерпаны для операции {op_name!r}.",
             details={

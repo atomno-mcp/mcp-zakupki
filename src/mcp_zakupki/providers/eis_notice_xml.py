@@ -15,6 +15,7 @@ from .html_fallback import _BASE, _guess_file_type, _parse_decimal
 
 _223_PRINT_PATH = "/epz/order/notice/notice223/printForm/view.html"
 _223_XML_PATH = "/epz/order/notice/notice223/printForm/viewXml.html"
+EZT20_CARD_PATH = "/epz/order/notice/ezt20/view/common-info.html"
 _GUID_RE = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", re.IGNORECASE)
 _NOTICE_NUMBER = re.compile(r"[0-9]{11}|[0-9]{19,21}")
 
@@ -174,10 +175,21 @@ def _detail_dates(
 def _tender_44(root: ET.Element, summary: Tender, *, include_documents: bool) -> Tender:
     number = _text(root, "commonInfo/purchaseNumber", "purchaseNumber")
     name = _text(root, "commonInfo/purchaseObjectInfo", "purchaseObjectInfo")
-    if number != summary.reg_number or not name:
+    if number != summary.reg_number:
         raise ParseError("ЕИС вернула XML без совпадающего номера и наименования извещения.")
 
     base = "notificationInfo"
+    positions = f"{base}/purchaseObjectsInfo/notDrugPurchaseObjectsInfo/purchaseObject"
+    names: list[str] = []
+    if root.tag.rsplit("}", 1)[-1] == "epNotificationEZT2020":
+        positions = f"{base}/purchaseObjectsInfo/purchaseObject"
+        names = list(dict.fromkeys(
+            position_name for node in _nodes(root, positions)
+            if (position_name := _text(node, "name", "KTRU/name"))
+        ))
+    if not name and not names:
+        raise ParseError("ЕИС вернула XML без совпадающего номера и наименования извещения.")
+
     price = f"{base}/contractConditionsInfo/maxPriceInfo"
     collecting = f"{base}/procedureInfo/collectingInfo"
     deadline = _text(root, f"{collecting}/endDT", f"{collecting}/endDate", "applicationInfo/applicationDeadline")
@@ -197,13 +209,13 @@ def _tender_44(root: ET.Element, summary: Tender, *, include_documents: bool) ->
         })
     auction_date, _ = source_datetime(_text(root, f"{base}/procedureInfo/biddingDT", "auctionDate"))
     url = public_eis_url(_text(root, "commonInfo/href")) or summary.url_eis
-    positions = f"{base}/purchaseObjectsInfo/notDrugPurchaseObjectsInfo/purchaseObject"
     ktru = _classification(_nodes(root, f"{positions}/KTRU"))
     okpd = _classification(_nodes(root, f"{positions}/OKPD2"))
     currency = _text(root, f"{price}/currency/code") or summary.currency
     price_value = _parse_decimal(_text(root, f"{price}/maxPrice", "maxPrice"))
     return summary.model_copy(update={
-        "title": name,
+        "title": name or (names[0] if len(names) == 1 else summary.title),
+        "title_full": "\n".join(names) if not name and len(names) > 1 else summary.title_full,
         "customer": customer,
         "url_eis": url,
         "price_initial_rub": None if currency != "RUB" else (

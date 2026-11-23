@@ -6,6 +6,14 @@
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-11-23
+
+### Fixed
+
+- Поиск по ключевым словам сохраняет карточки закупок по ч. 12 ст. 93 44-ФЗ, если ЕИС не показывает предмет закупки в списке.
+- При открытии такой карточки предмет считывается из XML извещения.
+- При ошибке разбора ответ содержит её причину.
+
 ## [0.2.1] — 2026-11-22
 
 ### Fixed
@@ -73,6 +81,7 @@
 
 Первый публичный релиз.
 
+[0.2.2]: https://github.com/atomno-mcp/mcp-zakupki/releases/tag/v0.2.2
 [0.2.1]: https://github.com/atomno-mcp/mcp-zakupki/releases/tag/v0.2.1
 [0.2.0]: https://github.com/atomno-mcp/mcp-zakupki/releases/tag/v0.2.0
 [0.1.9]: https://github.com/atomno-mcp/mcp-zakupki/releases/tag/v0.1.9

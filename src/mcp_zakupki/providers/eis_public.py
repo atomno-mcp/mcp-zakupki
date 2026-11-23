@@ -32,7 +32,13 @@ from ..schemas import (
 )
 from ..search_contract import MAX_PAGE, validate_public_search
 from .base import BaseProvider, ProviderCapability, ProviderInfo
-from .eis_notice_xml import is_notice_number, parse_notice_xml, print_links_223, public_eis_url
+from .eis_notice_xml import (
+    EZT20_CARD_PATH,
+    is_notice_number,
+    parse_notice_xml,
+    print_links_223,
+    public_eis_url,
+)
 from .eis_regions import REGION_NAMES, normalize_customer_regions
 from .html_fallback import (
     _BASE as _EIS_BASE,
@@ -102,7 +108,7 @@ class EisPublicProvider(BaseProvider):
         page = int(params["pageNumber"])
         tenders = _page_tenders(tree, page)
         if any(tender.law_type not in filter_.law_type for tender in tenders) and filter_.law_type:
-            raise ParseError("ЕИС вернула извещения вне выбранного закона.")
+            raise _search_parse_error("ЕИС вернула извещения вне выбранного закона.", "law_filter_mismatch")
         tenders = _filter_customer_location(tree, params, tenders)
         query = filter_.query
         if query and is_notice_number(query):
@@ -116,7 +122,10 @@ class EisPublicProvider(BaseProvider):
                 tender.customer.region_code and tender.customer.region_code not in regions
                 for tender in tenders
             ):
-                raise ParseError("Регион заказчика в карточке расходится с фильтром реестра ЕИС.")
+                raise _search_parse_error(
+                    "Регион заказчика в карточке расходится с фильтром реестра ЕИС.",
+                    "notice_region_mismatch",
+                )
             return _search_result(filter_, tenders, total=len(tenders))
 
         return _search_result(filter_, tenders, total=_search_total(tree), next_token=_next_page(tree, page))
@@ -342,11 +351,17 @@ def _page_tenders(tree: HTMLParser, page: int) -> list[Tender]:
         # При запросе за концом выдачи ЕИС может заново отрисовать последнюю страницу.
         return []
     if active is not None and active > page:
-        raise ParseError("ЕИС вернула другую страницу поиска.")
+        raise _search_parse_error(
+            "ЕИС вернула другую страницу поиска.",
+            "unexpected_page", requested_page=page, returned_page=active,
+        )
     tenders = _parse_search_cards(tree)
     if tenders or tree.css_first(".noRecords") or _search_total(tree) == 0:
         return tenders
-    raise ParseError("ЕИС не вернула распознаваемую страницу результатов поиска.")
+    raise _search_parse_error(
+        "ЕИС не вернула распознаваемую страницу результатов поиска.",
+        "unknown_search_page", requested_page=page,
+    )
 
 
 def _filter_customer_location(
@@ -362,7 +377,10 @@ def _filter_customer_location(
         node = tree.css_first(f'input[name="{field}"]')
         returned = node.attributes.get("value", "") if node else ""
         if set(returned.split(",")) != kladr:
-            raise ParseError("ЕИС не подтвердила выбранное местоположение заказчика.")
+            raise _search_parse_error(
+                "ЕИС не подтвердила выбранное местоположение заказчика.",
+                "location_filter_not_confirmed",
+            )
     if len(kladr) == 1:
         code = requested[:2]
         return [
@@ -387,13 +405,23 @@ def parse_search_html(html: str) -> list[Tender]:
     return _parse_search_cards(HTMLParser(html))
 
 
+def _search_parse_error(message: str, reason: str, **positions: int) -> ParseError:
+    return ParseError(
+        message,
+        details={"eis_search": {"reason": reason, **positions}},
+    )
+
+
 def _parse_search_cards(tree: HTMLParser) -> list[Tender]:
     blocks = tree.css(".registry-entry__form") or tree.css(".registry-entry__header")
     tenders: dict[str, Tender] = {}
-    for block in blocks:
+    for position, block in enumerate(blocks, 1):
         tender = _parse_search_block(block)
         if tender is None:
-            raise ParseError("ЕИС вернула неполную разметку извещения в результатах.")
+            raise _search_parse_error(
+                "ЕИС вернула неполную разметку извещения в результатах.",
+                "invalid_notice_row", row=position, rows=len(blocks),
+            )
         tenders.setdefault(tender.reg_number, tender)
     return list(tenders.values())
 
@@ -441,14 +469,26 @@ def _parse_search_block(block: Node) -> Tender | None:
     canonical = public_eis_url(link.attributes.get("href"))
     if not canonical:
         return None
-    number = parse_qs(urlsplit(canonical).query).get("regNumber", [""])[0]
+    card_url = urlsplit(canonical)
+    number = parse_qs(card_url.query).get("regNumber", [""])[0]
     if not is_notice_number(number):
         return None
     header = _first_text(block, ".registry-entry__header-top__title") or ""
     law = _law_from_header(header)
-    title = _first_text(block, ".registry-entry__body-value")
-    if not title or not law or (law == LawType.FZ_223) != (len(number) == 11):
+    if not law or (law == LawType.FZ_223) != (len(number) == 11):
         return None
+    if law == LawType.FZ_44 and card_url.path == EZT20_CARD_PATH:
+        # У электронных закупок у единственного поставщика на странице поиска
+        # может не быть предмета. Он находится в товарных позициях XML извещения.
+        title = None
+        for row in block.css(".registry-entry__body-block"):
+            if _first_text(row, ".registry-entry__body-title") in {"Объект закупки", "Наименование закупки"}:
+                title = _first_text(row, ".registry-entry__body-value")
+                break
+    else:
+        title = _first_text(block, ".registry-entry__body-value")
+        if not title:
+            return None
 
     url_xml = f"{_EIS_BASE}{_VIEW_XML}?regNumber={number}"
     if law == LawType.FZ_223:
@@ -463,7 +503,7 @@ def _parse_search_block(block: Node) -> Tender | None:
     return Tender(
         reg_number=number,
         law_type=law,
-        title=title,
+        title=title or "",
         customer=_customer_from_card(block),
         price_initial_rub=_parse_price(_first_text(block, ".price-block__value") or _first_text(block, ".price-block") or ""),
         platform=Platform.OTHER,
