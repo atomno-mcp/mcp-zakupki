@@ -6,6 +6,13 @@
 
 ## [Unreleased]
 
+## [0.2.3] — 2026-11-23
+
+### Fixed
+
+- Обновлён публичный адрес автора пакета.
+- В подсказке по доступу к API указан адрес поддержки.
+
 ## [0.2.2] — 2026-11-23
 
 ### Fixed
@@ -81,6 +88,7 @@
 
 Первый публичный релиз.
 
+[0.2.3]: https://github.com/atomno-mcp/mcp-zakupki/releases/tag/v0.2.3
 [0.2.2]: https://github.com/atomno-mcp/mcp-zakupki/releases/tag/v0.2.2
 [0.2.1]: https://github.com/atomno-mcp/mcp-zakupki/releases/tag/v0.2.1
 [0.2.0]: https://github.com/atomno-mcp/mcp-zakupki/releases/tag/v0.2.0

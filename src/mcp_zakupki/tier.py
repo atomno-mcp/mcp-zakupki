@@ -9,7 +9,7 @@ from .errors import ProRequiredError
 _ANALYTICS_HINT = (
     "Аналитика заказчиков/поставщиков доступна только через hosted API Atomno. "
     "Получите MCP_ZAKUPKI_ATOMNO_API_KEY: https://atomno-mcp.ru/pricing — "
-    "или напишите hello@atomno.ru."
+    "или напишите support@atomno-mcp.ru."
 )
 
 

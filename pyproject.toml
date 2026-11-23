@@ -4,12 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "atomno-mcp-zakupki"
-version = "0.2.2"
+version = "0.2.3"
 description = "MCP-сервер для российских госзакупок (zakupki.gov.ru, 44-ФЗ / 223-ФЗ / 615-ПП): поиск, карточка закупки, карточка организации, справочник ОКПД2."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "atomno-mcp", email = "hello@atomno.ru" }]
+authors = [{ name = "atomno-mcp", email = "hello@atomno-mcp.ru" }]
 keywords = [
   "mcp",
   "model-context-protocol",
